@@ -1,0 +1,6 @@
+# Copy this file to .dev.vars for local development (npm run dev).
+# On Cloudflare itself, set these under Settings -> Variables and Secrets
+# instead -- see README.md. Never commit a real .dev.vars file.
+
+TELEGRAM_BOT_TOKEN=123456789:AAExampleTokenReplaceMe
+TELEGRAM_BOT_USERNAME=your_bot_username

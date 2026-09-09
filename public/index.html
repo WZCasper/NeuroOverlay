@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NeuroOverlay — вход</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{--tc:#eab308;--glow:rgba(234,179,8,.7)}
+  body{
+    background:#0a0a0a;color:#f3f4f6;font-family:'Inter',sans-serif;
+    min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;
+  }
+  .card{
+    background:#0f0f0f;border:2px solid var(--tc);border-radius:14px;
+    padding:36px 32px;width:100%;max-width:400px;text-align:center;
+    box-shadow:0 0 60px rgba(0,0,0,.9);
+  }
+  h1{
+    color:var(--tc);font-size:1.3rem;font-weight:900;text-transform:uppercase;
+    letter-spacing:.08em;margin-bottom:8px;
+  }
+  p.sub{color:#888;font-size:13px;line-height:1.6;margin-bottom:26px}
+  #widgetHost{display:flex;justify-content:center;min-height:44px;align-items:center}
+  #statusMsg{margin-top:16px;font-size:12.5px;color:#888;min-height:18px}
+  #errMsg{margin-top:16px;font-size:12.5px;color:#ef4444;display:none}
+  .footnote{margin-top:28px;font-size:11px;color:#444;line-height:1.6}
+  .footnote a{color:#666}
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>⚡ NeuroOverlay</h1>
+    <p class="sub">Оверлей для OBS Studio и TikTok LIVE Studio.<br>Войдите через Telegram, чтобы открыть личный кабинет — сайт бесплатный.</p>
+    <div id="widgetHost"></div>
+    <div id="statusMsg"></div>
+    <div id="errMsg">Не удалось войти. Обновите страницу и попробуйте ещё раз.</div>
+    <p class="footnote">Нажимая «Войти через Telegram», вы разрешаете сайту получить ваше публичное имя, username и фото профиля Telegram для создания аккаунта.</p>
+  </div>
+
+<script>
+(async function(){
+  var statusEl = document.getElementById("statusMsg");
+  var errEl = document.getElementById("errMsg");
+
+  // Already logged in? Skip straight to the dashboard.
+  try {
+    var meRes = await fetch("/api/auth/me", { credentials: "same-origin" });
+    if (meRes.status === 200) {
+      location.href = "/dashboard";
+      return;
+    }
+  } catch (e) { /* ignore — fall through to showing the login widget */ }
+
+  var cfg = {};
+  try {
+    var cfgRes = await fetch("/api/config");
+    cfg = await cfgRes.json();
+  } catch (e) {}
+
+  if (!cfg.telegramBotUsername) {
+    statusEl.textContent = "";
+    errEl.style.display = "block";
+    errEl.textContent = "Сервер не настроен (не задан бот). Свяжитесь с администратором сайта.";
+    return;
+  }
+
+  // Telegram calls this once the person approves the login in the widget.
+  window.onTelegramAuth = function(user) {
+    statusEl.textContent = "Входим…";
+    errEl.style.display = "none";
+    fetch("/api/auth/telegram", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify(user),
+    })
+      .then(function(r){ return r.json().then(function(body){ return { ok: r.ok, body: body }; }); })
+      .then(function(res){
+        if (res.ok) {
+          location.href = "/dashboard";
+        } else {
+          statusEl.textContent = "";
+          errEl.style.display = "block";
+        }
+      })
+      .catch(function(){
+        statusEl.textContent = "";
+        errEl.style.display = "block";
+      });
+  };
+
+  var s = document.createElement("script");
+  s.async = true;
+  s.src = "https://telegram.org/js/telegram-widget.js?22";
+  s.setAttribute("data-telegram-login", cfg.telegramBotUsername);
+  s.setAttribute("data-size", "large");
+  s.setAttribute("data-radius", "8");
+  s.setAttribute("data-onauth", "onTelegramAuth(user)");
+  s.setAttribute("data-request-access", "write");
+  document.getElementById("widgetHost").appendChild(s);
+})();
+</script>
+</body>
+</html>

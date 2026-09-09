@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NeuroOverlay — админ</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{--tc:#eab308}
+  body{background:#0a0a0a;color:#f3f4f6;font-family:'Inter',sans-serif;padding:24px;min-height:100vh}
+  .wrap{max-width:840px;margin:0 auto}
+  header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:10px}
+  h1{color:var(--tc);font-size:1.1rem;font-weight:900;text-transform:uppercase;letter-spacing:.08em}
+  a.back{color:#888;font-size:12.5px;text-decoration:none}
+  a.back:hover{color:var(--tc)}
+  .stat{color:#888;font-size:12.5px;margin-bottom:16px}
+  input#q{width:100%;background:#0f0f0f;border:1px solid #3f3f46;border-radius:8px;padding:10px 12px;color:#fff;font-size:13px;margin-bottom:16px;outline:none}
+  input#q:focus{border-color:var(--tc)}
+  table{width:100%;border-collapse:collapse;background:#0f0f0f;border:1px solid #27272a;border-radius:10px;overflow:hidden}
+  th,td{text-align:left;padding:10px 12px;font-size:12.5px;border-bottom:1px solid #1f1f1f}
+  th{color:#888;text-transform:uppercase;letter-spacing:.05em;font-size:10.5px}
+  tr:last-child td{border-bottom:none}
+  .badge{display:inline-block;padding:2px 8px;border-radius:5px;font-size:10.5px;font-weight:700}
+  .badge.admin{background:#1a2a1a;color:#22c55e}
+  #empty,#err,#loading{color:#666;font-size:13px;padding:20px 0;text-align:center}
+  #err{color:#ef4444;display:none}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>⚙ Пользователи NeuroOverlay</h1>
+      <a class="back" href="/dashboard">← в личный кабинет</a>
+    </header>
+    <div class="stat" id="stat"></div>
+    <input type="text" id="q" placeholder="Поиск по username или Telegram ID…">
+    <div id="loading">Загрузка…</div>
+    <div id="err">Не удалось загрузить список — либо у вас нет прав администратора, либо нужно войти заново.</div>
+    <table id="tbl" style="display:none">
+      <thead><tr><th>Пользователь</th><th>Telegram ID</th><th>Роль</th><th>Регистрация</th></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+    <div id="empty" style="display:none">Никого не найдено.</div>
+  </div>
+
+<script>
+(function(){
+  var qEl = document.getElementById("q");
+  var tbl = document.getElementById("tbl");
+  var tbody = document.getElementById("tbody");
+  var loadingEl = document.getElementById("loading");
+  var errEl = document.getElementById("err");
+  var emptyEl = document.getElementById("empty");
+  var statEl = document.getElementById("stat");
+  var debounceTimer = null;
+
+  function fmtDate(iso) {
+    try { return new Date(iso).toLocaleDateString("ru-RU", { year:"numeric", month:"short", day:"numeric" }); }
+    catch(e){ return iso; }
+  }
+
+  function render(users) {
+    tbody.innerHTML = "";
+    users.forEach(function(u){
+      var tr = document.createElement("tr");
+      var name = [u.firstName, u.lastName].filter(Boolean).join(" ") || "—";
+      var uname = u.username ? "@" + u.username : "";
+      tr.innerHTML =
+        "<td>" + name + (uname ? ' <span style="color:#666">' + uname + "</span>" : "") + "</td>" +
+        "<td style=\"font-family:monospace;color:#999\">" + u.telegramId + "</td>" +
+        "<td>" + (u.isAdmin ? '<span class="badge admin">админ</span>' : "") + "</td>" +
+        "<td style=\"color:#888\">" + fmtDate(u.createdAt) + "</td>";
+      tbody.appendChild(tr);
+    });
+    tbl.style.display = users.length ? "" : "none";
+    emptyEl.style.display = users.length ? "none" : "";
+  }
+
+  function load(q) {
+    loadingEl.style.display = "";
+    errEl.style.display = "none";
+    tbl.style.display = "none";
+    emptyEl.style.display = "none";
+    fetch("/api/admin/users" + (q ? "?q=" + encodeURIComponent(q) : ""), { credentials: "same-origin" })
+      .then(function(r){
+        if (!r.ok) throw new Error("http_" + r.status);
+        return r.json();
+      })
+      .then(function(body){
+        loadingEl.style.display = "none";
+        statEl.textContent = "Всего пользователей: " + body.totalUsers;
+        render(body.users);
+      })
+      .catch(function(){
+        loadingEl.style.display = "none";
+        errEl.style.display = "";
+      });
+  }
+
+  qEl.addEventListener("input", function(){
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(function(){ load(qEl.value.trim()); }, 300);
+  });
+
+  load("");
+})();
+</script>
+</body>
+</html>

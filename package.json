@@ -1,0 +1,22 @@
+{
+  "name": "neuroverlay-cf",
+  "version": "1.0.0",
+  "description": "NeuroOverlay backend on Cloudflare Workers: Telegram login, per-user overlay settings in D1, and live sync for OBS / TikTok LIVE Studio browser sources via Durable Objects.",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:migrate:local": "wrangler d1 execute neuroverlay --file=migrations/0001_init.sql --local",
+    "db:migrate:remote": "wrangler d1 execute neuroverlay --file=migrations/0001_init.sql --remote",
+    "make-admin": "node scripts/make-admin.mjs",
+    "smoke-test": "node scripts/smoke-test.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "wrangler": "^4.130.0",
+    "ws": "^8.21.3"
+  }
+}
