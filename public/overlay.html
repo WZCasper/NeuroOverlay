@@ -257,6 +257,16 @@ textarea.inp{resize:vertical}
     </div>
   </div>
 
+  <!-- ФОН ХОЛСТА ДЛЯ УДОБСТВА РЕДАКТИРОВАНИЯ (только в личном кабинете) -->
+  <div class="csec" id="novPreviewBgSec">
+    <span class="clbl">🎨 Фон для удобства редактирования</span>
+    <p class="cinfo" style="margin-top:0">Виден только здесь, в личном кабинете. В OBS / TikTok LIVE Studio фон всегда остаётся прозрачным — этот цвет туда никогда не попадает.</p>
+    <div style="display:flex;gap:6px;align-items:center">
+      <input type="color" id="novPreviewBgColor" value="#1a1a1a" style="width:44px;height:32px;padding:0;border:1px solid #3f3f46;border-radius:6px;background:none;cursor:pointer">
+      <button id="novPreviewBgOff" style="flex:1;padding:7px;background:transparent;color:#aaa;font-weight:600;border:1px solid #3f3f46;border-radius:6px;font-size:11.5px;cursor:pointer">Сделать прозрачным (как в OBS)</button>
+    </div>
+  </div>
+
   <!-- НАПОМИНАНИЕ О РЕЗЕРВНОЙ КОПИИ -->
   <div id="backupReminderBar" style="display:none;background:#3a2f0a;border:1px solid #7a5f00;border-radius:8px;padding:10px;margin-bottom:12px">
     <p style="margin:0 0 8px;font-size:11.5px;color:#eab308;line-height:1.4">💾 Давно не делали резервную копию настроек. Рекомендуем скачать бэкап — это займёт секунду.</p>
@@ -1153,6 +1163,37 @@ if (NOV_MODE === "dashboard") {
           .then(function(){ location.href = "/"; })
           .catch(function(){ location.href = "/"; });
       });
+    });
+  }
+
+  // Фон холста только для удобства редактирования — хранится ЧИСТО в
+  // этом браузере (localStorage), никогда не уходит на сервер и не
+  // попадает в общее состояние, которое рассылается на публичную
+  // страницу оверлея. Поэтому в OBS/TikTok его в принципе не может
+  // быть видно, даже теоретически.
+  var novBgKey = "nov_preview_bg";
+  var novBgColorInput = document.getElementById("novPreviewBgColor");
+  var novBgOffBtn = document.getElementById("novPreviewBgOff");
+  function novApplyPreviewBg(color){
+    document.body.style.background = color || "transparent";
+  }
+  try {
+    var novSavedBg = localStorage.getItem(novBgKey);
+    if (novSavedBg) {
+      novApplyPreviewBg(novSavedBg);
+      if (novBgColorInput) novBgColorInput.value = novSavedBg;
+    }
+  } catch(e){}
+  if (novBgColorInput) {
+    novBgColorInput.addEventListener("input", function(){
+      novApplyPreviewBg(novBgColorInput.value);
+      try { localStorage.setItem(novBgKey, novBgColorInput.value); } catch(e){}
+    });
+  }
+  if (novBgOffBtn) {
+    novBgOffBtn.addEventListener("click", function(){
+      novApplyPreviewBg(null);
+      try { localStorage.removeItem(novBgKey); } catch(e){}
     });
   }
 }
@@ -2909,9 +2950,23 @@ function buildState(){
   };
 }
 
+// Сравнение "изменилось ли состояние на самом деле" перед сохранением —
+// без этого каждое подстраховочное сохранение раз в 3 секунды (см. ниже)
+// рассылало бы состояние всем подключённым OBS/TikTok-страницам через
+// живую синхронизацию, даже когда ничего не менялось. Приём applyState()
+// пересобирает виджеты (тикеры, попапы и т.д.) заново, поэтому лишняя
+// рассылка каждые 3 секунды выглядела как постоянное моргание оверлея —
+// именно это и было причиной бага с морганием в OBS.
+function __novStatesEqual(a, b){
+  try { return JSON.stringify(a) === JSON.stringify(b); }
+  catch(e){ return false; }
+}
+
 function saveState(){
   try {
-    __novMainState = buildState();
+    var next = buildState();
+    if (__novStatesEqual(next, __novMainState)) return; // ничего не изменилось — не шлём лишний раз
+    __novMainState = next;
     __novPersistAll(false);
   } catch(e){ console.warn("OV6 save error:", e); }
 }
@@ -2922,7 +2977,9 @@ function saveState(){
 function flushSave(){
   if(saveTimer){ clearTimeout(saveTimer); saveTimer=null; }
   try {
-    __novMainState = buildState();
+    var next = buildState();
+    if (__novStatesEqual(next, __novMainState)) return;
+    __novMainState = next;
     __novPersistAll(true);
   } catch(e){ console.warn("OV6 save error:", e); }
 }
