@@ -232,7 +232,49 @@ textarea.inp{resize:vertical}
 </head>
 <body>
 
-<!-- ACTIVATION MODAL -->
+<!-- ИНСТРУКЦИЯ (показывается один раз за визит в личном кабинете, никогда не видна в OBS/TikTok) -->
+<div id="novInstrModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:999998;align-items:center;justify-content:center;padding:16px">
+  <div style="background:#0f0f0f;border:2px solid var(--tc);border-radius:14px;max-width:560px;width:100%;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 0 60px rgba(0,0,0,.9)">
+    <div style="padding:20px 24px 0 24px;flex-shrink:0">
+      <h2 style="color:var(--tc);font-size:1.1rem;font-weight:900;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">⚡ Как пользоваться NeuroOverlay</h2>
+    </div>
+    <div style="padding:12px 24px;overflow-y:auto;color:#ccc;font-size:13px;line-height:1.65">
+      <p style="color:var(--tc);font-weight:700;margin:10px 0 4px">Первые шаги</p>
+      <ol style="margin:0 0 10px 18px;padding:0">
+        <li>Дважды кликните по пустому месту холста — откроется (или закроется) эта панель настроек.</li>
+        <li>Настройте виджеты под себя — ник, соцсети, донаты и всё остальное (см. список ниже).</li>
+        <li>Вверху панели — ваша персональная ссылка на оверлей. Вставьте её в OBS Studio (Источник → «+» → Browser) или в TikTok LIVE Studio (Add Source → Link).</li>
+        <li>Готово. Всё, что вы меняете в панели, мгновенно появляется в трансляции — перезагружать источник не нужно.</li>
+      </ol>
+      <p style="color:var(--tc);font-weight:700;margin:14px 0 4px">Что можно настроить</p>
+      <ul style="margin:0 0 10px 18px;padding:0">
+        <li>💰 Донаты (DonationAlerts) — подключение аккаунта, алерты, виджет по ссылке, цель сбора</li>
+        <li>⏱ Таймер эфира, 👁 счётчик зрителей, 📡 соцсети</li>
+        <li>🗺 Ротация карт и 🔁 ротатор призывов — для Warzone/CoD-стримов</li>
+        <li>💬 Чат-бокс и попап последнего сообщения</li>
+        <li>🔔 Всплывающие окна, 📜 бегущие строки, 🖼 пользовательские окна — добавляйте и перетаскивайте прямо на холсте</li>
+        <li>🎨 Визуальный стиль — общее оформление</li>
+      </ul>
+      <p style="color:var(--tc);font-weight:700;margin:14px 0 4px">Полезные мелочи</p>
+      <ul style="margin:0 0 10px 18px;padding:0">
+        <li>🎨 «Фон для удобства редактирования» — цвет фона только для вас; в OBS/TikTok его никогда не видно</li>
+        <li>💾 Делайте резервную копию время от времени — если что, настройки восстанавливаются из файла</li>
+        <li>🔄 Ссылка «утекла»? Обновите её одной кнопкой — старая перестанет работать сразу</li>
+        <li>💾 Пресеты — сохраняйте несколько раскладок и переключайтесь между ними одним кликом</li>
+      </ul>
+      <p style="color:var(--tc);font-weight:700;margin:14px 0 4px">Если оверлей не показывается в TikTok LIVE Studio</p>
+      <p style="margin:0 0 6px 0">У TikTok иногда глючит встроенный источник Link. Самый надёжный способ — вести трансляцию через OBS с этой же ссылкой, а в TikTok LIVE Studio выбрать источником камеры «OBS Virtual Camera».</p>
+    </div>
+    <div style="padding:14px 24px 20px 24px;border-top:1px solid #1f1f1f;flex-shrink:0">
+      <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#999;margin-bottom:12px;cursor:pointer">
+        <input type="checkbox" id="novInstrDontShow" style="width:15px;height:15px;cursor:pointer">
+        Больше не показывать
+      </label>
+      <button id="novInstrClose" style="width:100%;padding:10px;background:var(--tc);color:#000;border:none;border-radius:8px;font-weight:800;font-size:13px;cursor:pointer;text-transform:uppercase;letter-spacing:.05em">Понятно, закрыть</button>
+    </div>
+  </div>
+</div>
+
 <!-- CONFIG PANEL -->
 <aside id="cfg">
   <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #1f1f1f;padding-bottom:8px;margin-bottom:10px">
@@ -265,6 +307,14 @@ textarea.inp{resize:vertical}
       <input type="color" id="novPreviewBgColor" value="#1a1a1a" style="width:44px;height:32px;padding:0;border:1px solid #3f3f46;border-radius:6px;background:none;cursor:pointer">
       <button id="novPreviewBgOff" style="flex:1;padding:7px;background:transparent;color:#aaa;font-weight:600;border:1px solid #3f3f46;border-radius:6px;font-size:11.5px;cursor:pointer">Сделать прозрачным (как в OBS)</button>
     </div>
+  </div>
+
+  <!-- ПОЛЕЗНЫЕ ССЫЛКИ -->
+  <div class="csec" id="novUsefulSec">
+    <span class="clbl">🔗 Полезное</span>
+    <button id="novBtnDownloadObs" style="width:100%;padding:9px;background:transparent;color:#aaa;font-weight:600;border:1px solid #3f3f46;border-radius:6px;font-size:12px;cursor:pointer;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;transition:border-color .2s,color .2s">⬇ Скачать OBS Studio</button>
+    <p class="cinfo" id="novObsHint" style="margin:0 0 10px 0"></p>
+    <button id="novBtn9x16" style="width:100%;padding:9px;background:transparent;color:#aaa;font-weight:600;border:1px solid #3f3f46;border-radius:6px;font-size:12px;cursor:pointer;text-transform:uppercase;letter-spacing:.05em">📱 9×16 Оверлей</button>
   </div>
 
   <!-- НАПОМИНАНИЕ О РЕЗЕРВНОЙ КОПИИ -->
@@ -1194,6 +1244,83 @@ if (NOV_MODE === "dashboard") {
     novBgOffBtn.addEventListener("click", function(){
       novApplyPreviewBg(null);
       try { localStorage.removeItem(novBgKey); } catch(e){}
+    });
+  }
+
+  // Скачать OBS Studio — тянем последнюю версию с официального GitHub
+  // релиза (сервер сам кеширует это на сутки, см. /api/obs-latest), и
+  // выбираем подходящий файл по операционной системе браузера.
+  var novDownloadBtn = document.getElementById("novBtnDownloadObs");
+  var novObsHint = document.getElementById("novObsHint");
+  if (novDownloadBtn) {
+    novDownloadBtn.addEventListener("click", function(){
+      var originalText = novDownloadBtn.textContent;
+      novDownloadBtn.disabled = true;
+      novDownloadBtn.textContent = "Проверяем последнюю версию...";
+      fetch("/api/obs-latest")
+        .then(function(r){ return r.json(); })
+        .then(function(data){
+          novDownloadBtn.disabled = false;
+          novDownloadBtn.textContent = originalText;
+          if (!data || data.error) {
+            window.open("https://obsproject.com/download", "_blank");
+            return;
+          }
+          var ua = navigator.userAgent || "";
+          var url = null;
+          if (/Windows/i.test(ua) && data.windowsInstallerUrl) {
+            url = data.windowsInstallerUrl;
+          } else if (/Macintosh|Mac OS X/i.test(ua)) {
+            // На 2026 год подавляющее большинство активных Mac — на Apple
+            // Silicon; если это окажется Intel Mac, ниже сразу есть ссылка
+            // на официальную страницу загрузок для выбора нужной версии.
+            url = data.macAppleSiliconUrl || data.macIntelUrl;
+          }
+          if (url) {
+            var a = document.createElement("a");
+            a.href = url; a.download = "";
+            document.body.appendChild(a); a.click(); a.remove();
+            if (novObsHint) {
+              novObsHint.innerHTML = "Скачивание началось" + (data.version ? " (версия " + data.version + ")" : "") +
+                ". Не то? <a href=\"" + data.releasePageUrl + "\" target=\"_blank\" style=\"color:var(--tc)\">Страница загрузок OBS</a>";
+            }
+          } else {
+            window.open(data.releasePageUrl || "https://obsproject.com/download", "_blank");
+          }
+        })
+        .catch(function(){
+          novDownloadBtn.disabled = false;
+          novDownloadBtn.textContent = originalText;
+          window.open("https://obsproject.com/download", "_blank");
+        });
+    });
+  }
+
+  var nov9x16Btn = document.getElementById("novBtn9x16");
+  if (nov9x16Btn) {
+    nov9x16Btn.addEventListener("click", function(){
+      window.open("https://wzcasper.github.io/Neuro-Grafic/", "_blank");
+    });
+  }
+
+  // Инструкция по использованию — показывается один раз за визит (пока не
+  // отмечена галочка «Больше не показывать»); хранится локально в этом
+  // браузере, только для личного кабинета, в OBS/TikTok её нет и не будет.
+  var novInstrKey = "nov_hide_instructions";
+  var novInstrModal = document.getElementById("novInstrModal");
+  var novInstrClose = document.getElementById("novInstrClose");
+  var novInstrCheckbox = document.getElementById("novInstrDontShow");
+  if (novInstrModal && novInstrClose) {
+    var novInstrHidden = false;
+    try { novInstrHidden = localStorage.getItem(novInstrKey) === "1"; } catch(e){}
+    if (!novInstrHidden) {
+      novInstrModal.style.display = "flex";
+    }
+    novInstrClose.addEventListener("click", function(){
+      novInstrModal.style.display = "none";
+      if (novInstrCheckbox && novInstrCheckbox.checked) {
+        try { localStorage.setItem(novInstrKey, "1"); } catch(e){}
+      }
     });
   }
 }

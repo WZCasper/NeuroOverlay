@@ -4,6 +4,7 @@ import { handleTelegramLogin, handleLogout, handleMe } from "./routes/auth.js";
 import { handleGetSettings, handlePutSettings, handleRegenerateToken } from "./routes/settings.js";
 import { handleGetOverlayState } from "./routes/overlay.js";
 import { handleListUsers } from "./routes/admin.js";
+import { handleObsLatest } from "./routes/obs.js";
 
 export { OverlayRoom } from "./room.js";
 
@@ -58,6 +59,9 @@ export default {
       }
       if (path === "/api/config" && method === "GET") {
         return json({ telegramBotUsername: env.TELEGRAM_BOT_USERNAME || null });
+      }
+      if (path === "/api/obs-latest" && method === "GET") {
+        return handleObsLatest(request, env, ctx);
       }
 
       // ---- API: auth ----
