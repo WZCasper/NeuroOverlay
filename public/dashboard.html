@@ -2,6 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <script>
 window.NOV_MODE = "dashboard";
 
@@ -97,6 +98,12 @@ textarea.inp{resize:vertical}
 .rng{width:100%;accent-color:var(--tc);cursor:pointer;display:block}
 /* Config panel */
 #cfg{position:fixed;top:0;left:-560px;width:560px;height:100%;background:#0a0a0a;border-right:2px solid var(--tc);z-index:9000;padding:14px;overflow-y:auto;transition:left .3s ease;box-shadow:4px 0 30px rgba(0,0,0,.9)}
+/* Мобильная адаптация личного кабинета: панель настроек занимает весь
+   экран вместо фиксированных 560px. Виджетов самого оверлея это не
+   касается — их вёрстка не меняется, меняется только UI-панель. */
+@media (max-width:640px){
+  #cfg{width:100vw;padding:12px}
+}
 #cfg::-webkit-scrollbar{width:5px}
 #cfg::-webkit-scrollbar-thumb{background:var(--tc);border-radius:3px}
 .csec{border-bottom:1px solid #1f1f1f;padding-bottom:12px;margin-bottom:12px}
@@ -282,11 +289,21 @@ textarea.inp{resize:vertical}
     <div style="display:flex;align-items:center"><span id="saveInd">✓ Сохранено</span><button id="btnCC" style="background:none;border:none;color:#555;font-size:1.3rem;cursor:pointer">✕</button></div>
   </div>
   <p class="cinfo">Двойной клик по пустому холсту = открыть/закрыть</p>
+  <p class="cinfo" id="novLiveStatus" style="margin-top:-4px"></p>
 
   <!-- АККАУНТ И ССЫЛКА НА ОВЕРЛЕЙ (веб-версия) -->
   <div class="csec" id="novAccountSec">
+    <span class="clbl">🗂 Профиль оверлея</span>
+    <p class="cinfo" style="margin-top:0">Отдельный профиль — это отдельная раскладка виджетов со своей ссылкой (например, «16:9 для стрима» и «9:16 вертикальный»).</p>
+    <div style="display:flex;gap:6px;margin-bottom:10px">
+      <select id="novProfileSelect" style="flex:1;background:#0f0f0f;border:1px solid #3f3f46;border-radius:6px;color:#fff;font-size:12px;padding:0 8px"></select>
+      <button id="novBtnNewProfile" title="Новый профиль" style="width:34px;background:transparent;color:var(--tc);border:1px solid #3f3f46;border-radius:6px;font-size:16px;font-weight:bold;cursor:pointer">+</button>
+      <button id="novBtnRenameProfile" title="Переименовать" style="width:34px;background:transparent;color:#aaa;border:1px solid #3f3f46;border-radius:6px;font-size:13px;cursor:pointer">✏</button>
+      <button id="novBtnDeleteProfile" title="Удалить профиль" style="width:34px;background:transparent;color:#ef4444;border:1px solid #3f3f46;border-radius:6px;font-size:13px;cursor:pointer">🗑</button>
+    </div>
+
     <span class="clbl">🔗 Ссылка для OBS / TikTok LIVE Studio</span>
-    <p class="cinfo" style="margin-top:0">Вставьте эту ссылку в OBS (Источник → Browser) или в TikTok LIVE Studio (Add Source → Link). Никому её не показывайте — по ней открывается ваш оверлей без входа.</p>
+    <p class="cinfo" style="margin-top:0">Вставьте эту ссылку в OBS (Источник → Browser) или в TikTok LIVE Studio (Add Source → Link). Никому её не показывайте — по ней открывается ваш оверлей без входа. У каждого профиля — своя ссылка.</p>
     <div style="display:flex;gap:6px;margin-bottom:8px">
       <input type="text" class="inp" id="novOverlayUrl" readonly style="flex:1;font-family:monospace;font-size:10.5px" onclick="this.select()">
       <button id="novBtnCopyUrl" style="padding:0 12px;background:var(--tc);color:#000;border:none;border-radius:6px;font-size:12px;font-weight:bold;cursor:pointer;white-space:nowrap">Копировать</button>
@@ -1004,10 +1021,10 @@ window.NOV_MODE = window.NOV_MODE || "public";
 window.NOV_TOKEN = window.NOV_TOKEN || null;
 
 // Loads everything the engine needs from the server *before* any widget
-// code runs: on the dashboard that's the logged-in user + their saved
-// settings; on the public OBS/TikTok page it's just the settings behind
-// the link's token. Replaces what used to be synchronous localStorage
-// reads scattered through the file.
+// code runs: on the dashboard that's the logged-in user + their profiles +
+// the active profile's saved settings; on the public OBS/TikTok page it's
+// just the settings behind the link's token. Replaces what used to be
+// synchronous localStorage reads scattered through the file.
 window.__novLoadInitial = async function () {
   try {
     var cfgRes = await fetch("/api/config");
@@ -1022,7 +1039,31 @@ window.__novLoadInitial = async function () {
       if (!meRes.ok) throw new Error("me_failed_" + meRes.status);
       var me = (await meRes.json()).user;
 
-      var stRes = await fetch("/api/settings", { credentials: "same-origin" });
+      var profilesRes = await fetch("/api/profiles", { credentials: "same-origin" });
+      if (!profilesRes.ok) throw new Error("profiles_failed_" + profilesRes.status);
+      var profiles = (await profilesRes.json()).profiles || [];
+      if (profiles.length === 0) {
+        // Not expected in practice (every account gets a default profile
+        // at signup/migration) but guard against a genuinely empty list.
+        var createRes = await fetch("/api/profiles", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ name: "Основной" }),
+        });
+        profiles = [(await createRes.json()).profile];
+      }
+
+      var savedActiveId = null;
+      try { savedActiveId = localStorage.getItem("nov_active_profile_id"); } catch (e) {}
+      var active = null;
+      for (var i = 0; i < profiles.length; i++) {
+        if (String(profiles[i].id) === String(savedActiveId)) { active = profiles[i]; break; }
+      }
+      if (!active) active = profiles[0];
+      try { localStorage.setItem("nov_active_profile_id", String(active.id)); } catch (e) {}
+
+      var stRes = await fetch("/api/profiles/" + active.id + "/settings", { credentials: "same-origin" });
       if (!stRes.ok) throw new Error("settings_failed_" + stRes.status);
       var st = await stRes.json();
       var envelope = st.state && st.state.v === 1 ? st.state : {};
@@ -1032,8 +1073,9 @@ window.__novLoadInitial = async function () {
         mode: "dashboard",
         config: config,
         user: me,
-        subscription: me.subscription,
-        overlayToken: me.overlayToken,
+        profiles: profiles,
+        activeProfileId: active.id,
+        overlayToken: active.token,
         state: envelope.main || {},
         presets: envelope.presets || {},
         daAuth: envelope.daAuth || null,
@@ -1051,7 +1093,6 @@ window.__novLoadInitial = async function () {
       ok: true,
       mode: "public",
       config: config,
-      subscription: { active: !!body.active, daysLeft: 0, trialAvailable: false, expiresAt: null },
       overlayToken: window.NOV_TOKEN,
       state: env2.main || {},
       presets: env2.presets || {},
@@ -1070,15 +1111,31 @@ window.__novLoadInitial = async function () {
 // being hidden/closed right after (e.g. OBS reloading the source).
 window.__novSaveEnvelope = function (envelope, immediate) {
   if (window.NOV_MODE !== "dashboard") return;
-  fetch("/api/settings", {
+  var profileId = window.__novActiveProfileId;
+  if (!profileId) return;
+  fetch("/api/profiles/" + profileId + "/settings", {
     method: "PUT",
     headers: { "content-type": "application/json" },
     credentials: "same-origin",
     keepalive: !!immediate,
     body: JSON.stringify({ state: envelope }),
-  }).catch(function (e) {
-    console.warn("[NeuroOverlay] save failed", e);
-  });
+  })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (body) {
+      // Lets the main engine show a "live source connected" indicator —
+      // broadcastTo is how many OBS/TikTok pages actually received this
+      // update just now. Defined further down, so guarded in case this
+      // resolves unusually early.
+      if (body && typeof window.__novOnSaveResult === "function") {
+        window.__novOnSaveResult(body);
+      }
+    })
+    .catch(function (e) {
+      console.warn("[NeuroOverlay] save failed", e);
+      if (typeof window.__novOnSaveResult === "function") {
+        window.__novOnSaveResult({ ok: false, networkError: true });
+      }
+    });
 };
 </script>
 
@@ -1089,6 +1146,7 @@ window.__novSaveEnvelope = function (envelope, immediate) {
 var NOV_MODE = window.NOV_MODE || "public";
 var NOV_TOKEN = window.NOV_TOKEN || null;
 var __nov = await window.__novLoadInitial();
+window.__novActiveProfileId = __nov && __nov.activeProfileId; // read by __novSaveEnvelope above
 
 if (!__nov || !__nov.ok) {
   if (__nov && __nov.notFound) {
@@ -1143,20 +1201,125 @@ var TROVO_SRC = "data:image/png;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/4gHYSUNDX1BST
 // The site is free now, properly: every Telegram account that logs in
 // gets full access immediately, with no gate to remove code around.
 
-// ══ ACCOUNT / OBS LINK (dashboard only) ═══════════════════════════════
+// ══ ACCOUNT / PROFILES / OBS LINK (dashboard only) ═════════════════════
 if (NOV_MODE === "dashboard") {
+  var novProfiles = __nov.profiles || [];
+  var novActiveProfileId = __nov.activeProfileId;
   var novUrlEl = document.getElementById("novOverlayUrl");
   var novCopyBtn = document.getElementById("novBtnCopyUrl");
   var novRegenBtn = document.getElementById("novBtnRegenUrl");
   var novWhoEl = document.getElementById("novAccountWho");
   var novAdminLinkEl = document.getElementById("novAdminLink");
   var novLogoutBtn = document.getElementById("novBtnLogout");
+  var novProfileSelect = document.getElementById("novProfileSelect");
+  var novNewProfileBtn = document.getElementById("novBtnNewProfile");
+  var novRenameProfileBtn = document.getElementById("novBtnRenameProfile");
+  var novDeleteProfileBtn = document.getElementById("novBtnDeleteProfile");
   var novOverlayToken = __nov.overlayToken;
 
   function novOverlayUrl() {
     return location.origin + "/overlay/" + novOverlayToken;
   }
   if (novUrlEl) novUrlEl.value = novOverlayUrl();
+
+  function novFindProfile(id){
+    for (var i=0;i<novProfiles.length;i++) if (String(novProfiles[i].id)===String(id)) return novProfiles[i];
+    return null;
+  }
+
+  function novRenderProfileSelect(){
+    if (!novProfileSelect) return;
+    novProfileSelect.innerHTML = "";
+    novProfiles.forEach(function(p){
+      var opt = document.createElement("option");
+      opt.value = p.id;
+      opt.textContent = p.name;
+      if (String(p.id) === String(novActiveProfileId)) opt.selected = true;
+      novProfileSelect.appendChild(opt);
+    });
+    if (novDeleteProfileBtn) {
+      novDeleteProfileBtn.disabled = novProfiles.length <= 1;
+      novDeleteProfileBtn.style.opacity = novProfiles.length <= 1 ? ".35" : "1";
+      novDeleteProfileBtn.style.cursor = novProfiles.length <= 1 ? "default" : "pointer";
+    }
+  }
+  novRenderProfileSelect();
+
+  // Переключение профиля перезагружает страницу — так весь оверлей (включая
+  // подключения DonationAlerts/Twitch) стартует заново и гарантированно
+  // консистентно для нового профиля, без риска смешать состояние старого
+  // и нового в одной вкладке.
+  if (novProfileSelect) {
+    novProfileSelect.addEventListener("change", function(){
+      var id = novProfileSelect.value;
+      if (String(id) === String(novActiveProfileId)) return;
+      try { localStorage.setItem("nov_active_profile_id", String(id)); } catch(e){}
+      location.reload();
+    });
+  }
+
+  if (novNewProfileBtn) {
+    novNewProfileBtn.addEventListener("click", function(){
+      showPrompt("Название нового профиля:", "Новый профиль", "Создать", function(name){
+        fetch("/api/profiles", {
+          method: "POST", headers: {"content-type":"application/json"}, credentials:"same-origin",
+          body: JSON.stringify({ name: name })
+        })
+          .then(function(r){ return r.json(); })
+          .then(function(body){
+            if (body && body.profile) {
+              try { localStorage.setItem("nov_active_profile_id", String(body.profile.id)); } catch(e){}
+              location.reload();
+            } else {
+              alert2(body && body.error === "too_many_profiles" ? "Достигнут лимит профилей." : "Не удалось создать профиль.");
+            }
+          })
+          .catch(function(){ alert2("Не удалось создать профиль."); });
+      });
+    });
+  }
+
+  if (novRenameProfileBtn) {
+    novRenameProfileBtn.addEventListener("click", function(){
+      var current = novFindProfile(novActiveProfileId);
+      showPrompt("Новое название профиля:", current ? current.name : "", "Сохранить", function(name){
+        fetch("/api/profiles/" + novActiveProfileId, {
+          method: "PATCH", headers: {"content-type":"application/json"}, credentials:"same-origin",
+          body: JSON.stringify({ name: name })
+        })
+          .then(function(r){ return r.json(); })
+          .then(function(body){
+            if (body && body.ok) location.reload();
+            else alert2("Не удалось переименовать профиль.");
+          })
+          .catch(function(){ alert2("Не удалось переименовать профиль."); });
+      });
+    });
+  }
+
+  if (novDeleteProfileBtn) {
+    novDeleteProfileBtn.addEventListener("click", function(){
+      if (novProfiles.length <= 1) return;
+      var current = novFindProfile(novActiveProfileId);
+      showConfirm(
+        "Удалить профиль «" + (current ? current.name : "") + "»? Настройки и ссылка на оверлей этого профиля удалятся безвозвратно.",
+        "Удалить",
+        function(){
+          fetch("/api/profiles/" + novActiveProfileId, { method: "DELETE", credentials: "same-origin" })
+            .then(function(r){ return r.json(); })
+            .then(function(body){
+              if (body && body.ok) {
+                try { localStorage.removeItem("nov_active_profile_id"); } catch(e){}
+                location.reload();
+              } else {
+                alert2("Не удалось удалить профиль.");
+              }
+            })
+            .catch(function(){ alert2("Не удалось удалить профиль."); });
+        }
+      );
+    });
+  }
 
   if (novCopyBtn) {
     novCopyBtn.addEventListener("click", function(){
@@ -1182,12 +1345,14 @@ if (NOV_MODE === "dashboard") {
         "Обновить ссылку на оверлей? Старая ссылка сразу перестанет работать — не забудьте вставить новую в OBS / TikTok LIVE Studio.",
         "Обновить",
         function(){
-          fetch("/api/settings/regenerate-token", { method: "POST", credentials: "same-origin" })
+          fetch("/api/profiles/" + novActiveProfileId + "/regenerate-token", { method: "POST", credentials: "same-origin" })
             .then(function(r){ return r.json(); })
             .then(function(body){
-              if (body && body.overlayToken) {
-                novOverlayToken = body.overlayToken;
+              if (body && body.token) {
+                novOverlayToken = body.token;
                 if (novUrlEl) novUrlEl.value = novOverlayUrl();
+                var p = novFindProfile(novActiveProfileId);
+                if (p) p.token = body.token;
               }
             })
             .catch(function(){ alert2("Не удалось обновить ссылку. Попробуйте ещё раз."); });
@@ -1323,6 +1488,32 @@ if (NOV_MODE === "dashboard") {
       }
     });
   }
+
+  // Индикатор «эфир подключён» — показывает, реально ли сейчас открыт
+  // источник в OBS/TikTok и получает изменения, а не просто что настройки
+  // сохранились в базу.
+  var novLiveStatusEl = document.getElementById("novLiveStatus");
+  function novRenderLiveStatus(connected){
+    if (!novLiveStatusEl) return;
+    if (connected > 0) {
+      novLiveStatusEl.innerHTML = '<span style="color:#22c55e">🟢 Эфир подключён</span> — изменения видны в OBS/TikTok сразу';
+    } else {
+      novLiveStatusEl.innerHTML = '<span style="color:#666">⚪ Источник не открыт</span> — вставьте ссылку выше в OBS/TikTok, чтобы видеть изменения вживую';
+    }
+  }
+  function novPollLiveStatus(){
+    fetch("/api/profiles/" + window.__novActiveProfileId + "/live-status", { credentials: "same-origin" })
+      .then(function(r){ return r.json(); })
+      .then(function(body){ novRenderLiveStatus(body.connected || 0); })
+      .catch(function(){});
+  }
+  window.__novOnSaveResult = function(result){
+    if (result && typeof result.broadcastTo === "number") {
+      novRenderLiveStatus(result.broadcastTo);
+    }
+  };
+  novPollLiveStatus();
+  setInterval(novPollLiveStatus, 10000);
 }
 
 // ══ DATA ══════════════════════════════════════════════
@@ -1482,6 +1673,44 @@ function showConfirm(message, confirmLabel, onConfirm){
   btnRow.appendChild(cancelBtn); btnRow.appendChild(okBtn);
   box.appendChild(msg); box.appendChild(btnRow);
   document.body.appendChild(box);
+}
+// То же самое, что showConfirm, но с текстовым полем — для названия
+// профиля (создание/переименование). onConfirm получает введённый текст;
+// пустое значение (или Отмена) ничего не вызывает.
+function showPrompt(message, defaultValue, confirmLabel, onConfirm){
+  var old=el("ov6PromptBox"); if(old) old.remove();
+  var box=document.createElement("div");
+  box.id="ov6PromptBox";
+  box.style.cssText="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#161616;border:1px solid #333;border-radius:10px;padding:18px;max-width:280px;text-align:center;font-family:'Inter',sans-serif;z-index:99999999;box-shadow:0 10px 40px rgba(0,0,0,.6)";
+  var msg=document.createElement("p");
+  msg.textContent=message;
+  msg.style.cssText="color:#f3f4f6;font-size:13px;margin:0 0 10px 0;line-height:1.4";
+  var input=document.createElement("input");
+  input.type="text";
+  input.value=defaultValue||"";
+  input.maxLength=60;
+  input.style.cssText="width:100%;background:#0a0a0a;border:1px solid #3f3f46;border-radius:6px;color:#fff;font-size:13px;padding:8px;margin-bottom:12px;box-sizing:border-box";
+  var btnRow=document.createElement("div");
+  btnRow.style.cssText="display:flex;gap:8px;justify-content:center";
+  var cancelBtn=document.createElement("button");
+  cancelBtn.textContent="Отмена";
+  cancelBtn.style.cssText="flex:1;background:#2a2a2a;color:#fff;border:none;border-radius:6px;padding:8px 0;font-size:12px;cursor:pointer";
+  var okBtn=document.createElement("button");
+  okBtn.textContent=confirmLabel||"Сохранить";
+  okBtn.style.cssText="flex:1;background:var(--tc);color:#000;border:none;border-radius:6px;padding:8px 0;font-size:12px;font-weight:bold;cursor:pointer";
+  function submit(){
+    var val=input.value.trim();
+    if(!val) return;
+    box.remove();
+    onConfirm(val);
+  }
+  okBtn.addEventListener("click",submit);
+  input.addEventListener("keydown",function(e){ if(e.key==="Enter") submit(); });
+  cancelBtn.addEventListener("click",function(){ box.remove(); });
+  btnRow.appendChild(cancelBtn); btnRow.appendChild(okBtn);
+  box.appendChild(msg); box.appendChild(input); box.appendChild(btnRow);
+  document.body.appendChild(box);
+  input.focus(); input.select();
 }
 function norm(e){
   var r=e.getBoundingClientRect(), cr=cvs.getBoundingClientRect();

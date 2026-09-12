@@ -1,6 +1,8 @@
 import { verifyTelegramLogin } from "../telegram.js";
 import { createSession, destroySession, sessionCookieHeader, clearSessionCookieHeader, readSessionIdFromRequest } from "../session.js";
 import { json, isHttps, randomToken } from "../http.js";
+import { sendTelegramMessage } from "../telegram-notify.js";
+import { DEFAULT_PROFILE_NAME } from "./profiles.js";
 
 function serializeUser(user) {
   return {
@@ -15,7 +17,24 @@ function serializeUser(user) {
   };
 }
 
-export async function handleTelegramLogin(request, env) {
+async function notifyAdminsOfNewUser(env, ctx, newUser) {
+  const { results } = await env.DB.prepare(
+    "SELECT telegram_id FROM users WHERE is_admin = 1 AND telegram_id != ?"
+  )
+    .bind(newUser.telegram_id)
+    .all();
+  if (!results || results.length === 0) return;
+
+  const name = [newUser.first_name, newUser.last_name].filter(Boolean).join(" ") || "(без имени)";
+  const handle = newUser.username ? "@" + newUser.username : "username не указан";
+  const text = `🆕 Новый пользователь NeuroOverlay\n${name} (${handle})`;
+
+  for (const row of results) {
+    ctx.waitUntil(sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, row.telegram_id, text));
+  }
+}
+
+export async function handleTelegramLogin(request, env, ctx) {
   const botToken = env.TELEGRAM_BOT_TOKEN;
   if (!botToken) return json({ error: "server_missing_bot_token" }, { status: 500 });
 
@@ -36,6 +55,7 @@ export async function handleTelegramLogin(request, env) {
   const db = env.DB;
 
   let user = await db.prepare("SELECT * FROM users WHERE telegram_id = ?").bind(telegramId).first();
+  const isNewUser = !user;
 
   if (user) {
     await db
@@ -57,6 +77,18 @@ export async function handleTelegramLogin(request, env) {
       .run();
     user = await db.prepare("SELECT * FROM users WHERE telegram_id = ?").bind(telegramId).first();
     await db.prepare("INSERT INTO overlay_settings (user_id, state) VALUES (?, '{}')").bind(user.id).run();
+    // Every account needs at least one overlay profile to actually use the
+    // site -- give them their first one immediately, reusing the same
+    // token so /overlay/<token> from a first-time signup works right away.
+    await db
+      .prepare("INSERT INTO overlay_profiles (user_id, name, token, state) VALUES (?, ?, ?, '{}')")
+      .bind(user.id, DEFAULT_PROFILE_NAME, overlayToken)
+      .run();
+  }
+
+  if (isNewUser && ctx) {
+    // Fire-and-forget -- must never delay or fail the person's own login.
+    ctx.waitUntil(notifyAdminsOfNewUser(env, ctx, user));
   }
 
   const session = await createSession(db, user.id);

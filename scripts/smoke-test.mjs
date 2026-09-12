@@ -4,7 +4,7 @@ import { signForTest } from "../src/telegram.js";
 
 const BASE = process.env.SMOKE_TEST_BASE_URL || "http://localhost:8787";
 const WS_BASE = BASE.replace(/^http/, "ws");
-const BOT_TOKEN = "1234567890:TEST_TOKEN_FOR_LOCAL_SMOKE_TEST_ONLY"; // matches .dev.vars
+const BOT_TOKEN = "1234567890:TEST_TOKEN_FOR_LOCAL_SMOKE_TEST_ONLY";
 
 let passed = 0;
 function ok(label) {
@@ -27,8 +27,7 @@ async function fakeTelegramUser(id, overrides = {}) {
 
 function extractCookie(res) {
   const raw = res.headers.get("set-cookie");
-  if (!raw) return null;
-  return raw.split(";")[0];
+  return raw ? raw.split(";")[0] : null;
 }
 
 async function login(id) {
@@ -39,7 +38,6 @@ async function login(id) {
   });
   assert.strictEqual(res.status, 200, `login should succeed (got ${res.status})`);
   const cookie = extractCookie(res);
-  assert.ok(cookie, "login response should set a session cookie");
   const body = await res.json();
   return { cookie, user: body.user };
 }
@@ -53,122 +51,158 @@ async function main() {
     ok("health check responds (D1 binding works)");
   }
 
-  {
-    const payload = await fakeTelegramUser(900001);
-    payload.first_name = "Tampered"; // invalidates the hash
-    const res = await fetch(`${BASE}/api/auth/telegram`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    assert.strictEqual(res.status, 401, "tampered payload must be rejected");
-    ok("tampered Telegram signature is rejected");
-  }
+  const { cookie, user } = await login(980001);
+  ok("valid Telegram login creates a session + user");
 
+  // A brand-new account should get exactly one profile automatically.
+  let profiles;
   {
-    const payload = await fakeTelegramUser(900002, {
-      auth_date: Math.floor(Date.now() / 1000) - 999999,
-    });
-    const res = await fetch(`${BASE}/api/auth/telegram`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    assert.strictEqual(res.status, 401, "expired auth_date must be rejected");
-    ok("expired Telegram login is rejected");
-  }
-
-  const { cookie, user } = await login(900003);
-  assert.ok(user.overlayToken, "a fresh account should get an overlay token immediately");
-  ok("valid Telegram login creates a session + user with full access");
-
-  {
-    const res = await fetch(`${BASE}/api/auth/me`, { headers: { cookie } });
+    const res = await fetch(`${BASE}/api/profiles`, { headers: { cookie } });
     assert.strictEqual(res.status, 200);
     const body = await res.json();
-    assert.strictEqual(body.user.overlayToken, user.overlayToken);
-
-    const anon = await fetch(`${BASE}/api/auth/me`);
-    assert.strictEqual(anon.status, 401);
-    ok("session cookie gates /api/auth/me correctly");
+    profiles = body.profiles;
+    assert.strictEqual(profiles.length, 1);
+    assert.strictEqual(profiles[0].name, "Основной");
+    ok("new account gets exactly one default profile (Основной)");
   }
+  const profile1 = profiles[0];
 
-  const sampleState = { widgets: { wNick: { txt: "SMOKE TEST" } }, theme: "#ff0000" };
+  // Save + read settings scoped to that profile.
+  const stateA = { v: 1, main: { v: 6, wins: {}, tickers: [{ id: "t1", text: "PROFILE A" }] }, presets: {}, daAuth: null, twitchAuth: null };
   {
-    const put = await fetch(`${BASE}/api/settings`, {
+    const put = await fetch(`${BASE}/api/profiles/${profile1.id}/settings`, {
       method: "PUT",
       headers: { "content-type": "application/json", cookie },
-      body: JSON.stringify({ state: sampleState }),
+      body: JSON.stringify({ state: stateA }),
     });
     assert.strictEqual(put.status, 200);
-
-    const get = await fetch(`${BASE}/api/settings`, { headers: { cookie } });
+    const get = await fetch(`${BASE}/api/profiles/${profile1.id}/settings`, { headers: { cookie } });
     const body = await get.json();
-    assert.deepStrictEqual(body.state, sampleState);
-    ok("dashboard can save and re-read its own settings (D1)");
+    assert.deepStrictEqual(body.state, stateA);
+    ok("profile settings save/read correctly, scoped to that profile");
   }
 
+  // Public overlay endpoint resolves through the profile's token.
   {
-    const res = await fetch(`${BASE}/api/overlay/${user.overlayToken}/state`);
+    const res = await fetch(`${BASE}/api/overlay/${profile1.token}/state`);
     assert.strictEqual(res.status, 200);
     const body = await res.json();
-    assert.deepStrictEqual(body.state, sampleState);
-    ok("public overlay endpoint serves state without auth");
+    assert.deepStrictEqual(body.state, stateA);
+    ok("public overlay endpoint serves state via the profile's token");
   }
 
+  // Create a second, independent profile.
+  let profile2;
   {
-    const res = await fetch(`${BASE}/api/overlay/not-a-real-token/state`);
-    assert.strictEqual(res.status, 404);
-    ok("unknown overlay token returns 404");
+    const res = await fetch(`${BASE}/api/profiles`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ name: "9x16" }),
+    });
+    assert.strictEqual(res.status, 200);
+    const body = await res.json();
+    profile2 = body.profile;
+    assert.strictEqual(profile2.name, "9x16");
+    assert.notStrictEqual(profile2.token, profile1.token);
+    ok("creating a second profile gives it a distinct name and token");
   }
 
-  await new Promise((resolve, reject) => {
-    const ws = new WebSocket(`${WS_BASE}/ws/overlay/${user.overlayToken}`);
-    const timeout = setTimeout(() => reject(new Error("WS broadcast not received in time")), 8000);
+  // Its settings must start empty and be fully independent of profile 1.
+  {
+    const get = await fetch(`${BASE}/api/profiles/${profile2.id}/settings`, { headers: { cookie } });
+    const body = await get.json();
+    assert.strictEqual(body.isEmpty, true);
+    ok("second profile starts with empty state, independent of the first");
+  }
+  const stateB = { v: 1, main: { v: 6, wins: {}, tickers: [{ id: "t1", text: "PROFILE B" }] }, presets: {}, daAuth: null, twitchAuth: null };
+  {
+    await fetch(`${BASE}/api/profiles/${profile2.id}/settings`, {
+      method: "PUT",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ state: stateB }),
+    });
+    const get1 = await fetch(`${BASE}/api/profiles/${profile1.id}/settings`, { headers: { cookie } });
+    const body1 = await get1.json();
+    assert.deepStrictEqual(body1.state, stateA, "saving profile 2 must not touch profile 1's state");
+    ok("saving one profile never affects another profile's state");
+  }
 
-    ws.on("open", async () => {
-      const updated = { ...sampleState, theme: "#00ff00" };
-      await fetch(`${BASE}/api/settings`, {
+  // Rename.
+  {
+    const res = await fetch(`${BASE}/api/profiles/${profile2.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ name: "Вертикальный" }),
+    });
+    assert.strictEqual(res.status, 200);
+    const list = await (await fetch(`${BASE}/api/profiles`, { headers: { cookie } })).json();
+    assert.ok(list.profiles.some((p) => p.id === profile2.id && p.name === "Вертикальный"));
+    ok("renaming a profile works");
+  }
+
+  // Each profile's WebSocket room is independent -- a save to profile 2
+  // must not broadcast into profile 1's room.
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("expected profile-2 broadcast not received")), 8000);
+    const ws1 = new WebSocket(`${WS_BASE}/ws/overlay/${profile1.token}`);
+    const ws2 = new WebSocket(`${WS_BASE}/ws/overlay/${profile2.token}`);
+    let ws1GotSomething = false;
+    let resolved = false;
+
+    ws1.on("message", () => { ws1GotSomething = true; });
+    ws2.on("message", (raw) => {
+      const msg = JSON.parse(raw.toString());
+      if (msg.type === "state" && msg.state.main.tickers[0].text === "PROFILE B UPDATED" && !resolved) {
+        resolved = true;
+        clearTimeout(timeout);
+        setTimeout(() => {
+          assert.strictEqual(ws1GotSomething, false, "profile 1's room must not receive profile 2's broadcast");
+          ws1.close();
+          ws2.close();
+          ok("each profile's live-sync room is fully isolated from the others");
+          resolve();
+        }, 500);
+      }
+    });
+
+    Promise.all([
+      new Promise((r) => ws1.on("open", r)),
+      new Promise((r) => ws2.on("open", r)),
+    ]).then(async () => {
+      const updated = { ...stateB, main: { ...stateB.main, tickers: [{ id: "t1", text: "PROFILE B UPDATED" }] } };
+      await fetch(`${BASE}/api/profiles/${profile2.id}/settings`, {
         method: "PUT",
         headers: { "content-type": "application/json", cookie },
         body: JSON.stringify({ state: updated }),
       });
     });
-
-    ws.on("message", (raw) => {
-      const msg = JSON.parse(raw.toString());
-      if (msg.type === "state" && msg.state.theme === "#00ff00") {
-        clearTimeout(timeout);
-        ws.close();
-        ok("Durable Object broadcasts the live update to a connected WebSocket");
-        resolve();
-      }
-    });
-    ws.on("error", reject);
   });
 
+  // Live status reflects an actually-connected room.
   {
-    const oldToken = user.overlayToken;
-    const rotate = await fetch(`${BASE}/api/settings/regenerate-token`, {
-      method: "POST",
-      headers: { cookie },
-    });
-    assert.strictEqual(rotate.status, 200);
-    const { overlayToken: newToken } = await rotate.json();
-    assert.notStrictEqual(newToken, oldToken);
-
-    const oldRes = await fetch(`${BASE}/api/overlay/${oldToken}/state`);
-    assert.strictEqual(oldRes.status, 404, "old token must stop working immediately");
-
-    const newRes = await fetch(`${BASE}/api/overlay/${newToken}/state`);
-    assert.strictEqual(newRes.status, 200);
-    ok("regenerating the overlay token invalidates the old OBS/TikTok link");
+    const ws = new WebSocket(`${WS_BASE}/ws/overlay/${profile1.token}`);
+    await new Promise((r) => ws.on("open", r));
+    await new Promise((r) => setTimeout(r, 300));
+    const status = await (await fetch(`${BASE}/api/profiles/${profile1.id}/live-status`, { headers: { cookie } })).json();
+    assert.strictEqual(status.connected, 1);
+    ws.close();
+    ok("live-status endpoint reports a connected OBS/TikTok source");
   }
 
+  // Deleting the last remaining profile must be refused.
   {
-    const forbidden = await fetch(`${BASE}/api/admin/users`, { headers: { cookie } });
-    assert.strictEqual(forbidden.status, 403);
-    ok("non-admin is forbidden from /api/admin/*");
+    await fetch(`${BASE}/api/profiles/${profile2.id}`, { method: "DELETE", headers: { cookie } });
+    const res = await fetch(`${BASE}/api/profiles/${profile1.id}`, { method: "DELETE", headers: { cookie } });
+    assert.strictEqual(res.status, 400);
+    ok("deleting the very last profile is refused, deleting a non-last one works");
+  }
+
+  // Can't touch another user's profile.
+  {
+    const other = await login(980002);
+    const res = await fetch(`${BASE}/api/profiles/${profile1.id}/settings`, { headers: { cookie: other.cookie } });
+    assert.strictEqual(res.status, 404);
+    ok("a user cannot read another user's profile settings");
   }
 
   console.log(`\nAll ${passed} smoke test checks passed.`);

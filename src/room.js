@@ -32,9 +32,19 @@ export class OverlayRoom {
       });
     }
 
+    if (url.pathname === "/status" && request.method === "GET") {
+      // Lets the dashboard show "OBS/TikTok connected" without needing to
+      // actually save anything -- just asks how many live sockets this
+      // room currently holds (works fine even if the object was just
+      // woken from hibernation, since the runtime tracks sockets for it).
+      return new Response(JSON.stringify({ connected: this.state.getWebSockets().length }), {
+        headers: { "content-type": "application/json" },
+      });
+    }
+
     if (request.headers.get("Upgrade") === "websocket") {
       const token = url.pathname.split("/").filter(Boolean).pop();
-      const row = await this.env.DB.prepare("SELECT 1 FROM users WHERE overlay_token = ?")
+      const row = await this.env.DB.prepare("SELECT 1 FROM overlay_profiles WHERE token = ?")
         .bind(token)
         .first();
       if (!row) {

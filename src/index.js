@@ -1,7 +1,16 @@
 import { readSessionIdFromRequest, getSessionUser } from "./session.js";
 import { json } from "./http.js";
 import { handleTelegramLogin, handleLogout, handleMe } from "./routes/auth.js";
-import { handleGetSettings, handlePutSettings, handleRegenerateToken } from "./routes/settings.js";
+import {
+  handleListProfiles,
+  handleCreateProfile,
+  handleRenameProfile,
+  handleDeleteProfile,
+  handleGetProfileSettings,
+  handlePutProfileSettings,
+  handleRegenerateProfileToken,
+  handleProfileLiveStatus,
+} from "./routes/profiles.js";
 import { handleGetOverlayState } from "./routes/overlay.js";
 import { handleListUsers } from "./routes/admin.js";
 import { handleObsLatest } from "./routes/obs.js";
@@ -66,7 +75,7 @@ export default {
 
       // ---- API: auth ----
       if (path === "/api/auth/telegram" && method === "POST") {
-        return handleTelegramLogin(request, env);
+        return handleTelegramLogin(request, env, ctx);
       }
       if (path === "/api/auth/logout" && method === "POST") {
         return handleLogout(request, env);
@@ -82,18 +91,42 @@ export default {
         return handleGetOverlayState(request, env, ctx, { token: m[1] });
       }
 
-      // ---- API: settings (auth required) ----
-      if (path === "/api/settings" && method === "GET") {
+      // ---- API: profiles (auth required for all of these) ----
+      if (path === "/api/profiles" && method === "GET") {
         const user = await getCurrentUser(request, env);
-        return requireAuth(user) || handleGetSettings(request, env, ctx, user);
+        return requireAuth(user) || handleListProfiles(request, env, ctx, user);
       }
-      if (path === "/api/settings" && method === "PUT") {
+      if (path === "/api/profiles" && method === "POST") {
         const user = await getCurrentUser(request, env);
-        return requireAuth(user) || handlePutSettings(request, env, ctx, user);
+        return requireAuth(user) || handleCreateProfile(request, env, ctx, user);
       }
-      if (path === "/api/settings/regenerate-token" && method === "POST") {
+      m = path.match(/^\/api\/profiles\/(\d+)$/);
+      if (m && method === "PATCH") {
         const user = await getCurrentUser(request, env);
-        return requireAuth(user) || handleRegenerateToken(request, env, ctx, user);
+        return requireAuth(user) || handleRenameProfile(request, env, ctx, user, { id: m[1] });
+      }
+      if (m && method === "DELETE") {
+        const user = await getCurrentUser(request, env);
+        return requireAuth(user) || handleDeleteProfile(request, env, ctx, user, { id: m[1] });
+      }
+      m = path.match(/^\/api\/profiles\/(\d+)\/settings$/);
+      if (m && method === "GET") {
+        const user = await getCurrentUser(request, env);
+        return requireAuth(user) || handleGetProfileSettings(request, env, ctx, user, { id: m[1] });
+      }
+      if (m && method === "PUT") {
+        const user = await getCurrentUser(request, env);
+        return requireAuth(user) || handlePutProfileSettings(request, env, ctx, user, { id: m[1] });
+      }
+      m = path.match(/^\/api\/profiles\/(\d+)\/regenerate-token$/);
+      if (m && method === "POST") {
+        const user = await getCurrentUser(request, env);
+        return requireAuth(user) || handleRegenerateProfileToken(request, env, ctx, user, { id: m[1] });
+      }
+      m = path.match(/^\/api\/profiles\/(\d+)\/live-status$/);
+      if (m && method === "GET") {
+        const user = await getCurrentUser(request, env);
+        return requireAuth(user) || handleProfileLiveStatus(request, env, ctx, user, { id: m[1] });
       }
 
       // ---- API: admin (auth + is_admin required, checked inside) ----
