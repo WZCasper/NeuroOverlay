@@ -301,6 +301,11 @@ textarea.inp{resize:vertical}
       <button id="novBtnRenameProfile" title="Переименовать" style="width:34px;background:transparent;color:#aaa;border:1px solid #3f3f46;border-radius:6px;font-size:13px;cursor:pointer">✏</button>
       <button id="novBtnDeleteProfile" title="Удалить профиль" style="width:34px;background:transparent;color:#ef4444;border:1px solid #3f3f46;border-radius:6px;font-size:13px;cursor:pointer">🗑</button>
     </div>
+    <p class="cinfo" style="margin:0 0 6px 0">Формат кадра этого профиля (меняйте в начале работы — при смене формата виджеты, скорее всего, придётся переставить под новые пропорции):</p>
+    <div style="display:flex;gap:6px;margin-bottom:10px">
+      <button id="novBtnFmt169" style="flex:1;padding:7px 0;border-radius:6px;font-size:11.5px;cursor:pointer">16:9 горизонтальный</button>
+      <button id="novBtnFmt916" style="flex:1;padding:7px 0;border-radius:6px;font-size:11.5px;cursor:pointer">9:16 вертикальный</button>
+    </div>
 
     <span class="clbl">🔗 Ссылка для OBS / TikTok LIVE Studio</span>
     <p class="cinfo" style="margin-top:0">Вставьте эту ссылку в OBS (Источник → Browser) или в TikTok LIVE Studio (Add Source → Link). Никому её не показывайте — по ней открывается ваш оверлей без входа. У каждого профиля — своя ссылка.</p>
@@ -864,7 +869,12 @@ textarea.inp{resize:vertical}
 </div>
 
 <!-- CANVAS -->
-<main id="cvs" style="position:relative;aspect-ratio:16/9;width:min(100vw,calc(100vh * 16 / 9));height:min(100vh,calc(100vw * 9 / 16));overflow:hidden;user-select:none;flex-shrink:0">
+<!-- Формат задаётся CSS-переменными --cvs-w/--cvs-h (по умолчанию 16/9,
+     как было всегда) — JS ниже переключает их на 9/16 для вертикальных
+     профилей. Раньше соотношение сторон было зашито в этой строке жёстко
+     как 16/9, из-за чего вертикальный формат физически не мог правильно
+     отобразиться ни в редакторе, ни в самом OBS. -->
+<main id="cvs" style="position:relative;aspect-ratio:var(--cvs-w,16)/var(--cvs-h,9);width:min(100vw,calc(100vh * var(--cvs-w,16) / var(--cvs-h,9)));height:min(100vh,calc(100vw * var(--cvs-h,9) / var(--cvs-w,16)));overflow:hidden;user-select:none;flex-shrink:0">
   <!-- ВЕБКАМЕРА -->
   <div id="wCam" class="dwin wb" style="left:2%;top:15%;width:15%;height:28%">
     <div class="gear" data-id="wCam"><i class="fa-solid fa-gear"></i></div>
@@ -1080,6 +1090,7 @@ window.__novLoadInitial = async function () {
         presets: envelope.presets || {},
         daAuth: envelope.daAuth || null,
         twitchAuth: envelope.twitchAuth || null,
+        canvasFormat: envelope.canvasFormat || "16:9",
       };
     }
 
@@ -1098,6 +1109,7 @@ window.__novLoadInitial = async function () {
       presets: env2.presets || {},
       daAuth: env2.daAuth || null,
       twitchAuth: env2.twitchAuth || null,
+      canvasFormat: env2.canvasFormat || "16:9",
     };
   } catch (e) {
     console.error("[NeuroOverlay] bootstrap failed", e);
@@ -1183,9 +1195,17 @@ var __novMainState = __nov.state || {};
 var __novPresets = __nov.presets || {};
 var __novDaAuth = __nov.daAuth || null;
 var __novTwitchAuth = __nov.twitchAuth || null;
+var __novCanvasFormat = __nov.canvasFormat || "16:9";
+function __novApplyCanvasFormat(format){
+  var w = format === "9:16" ? 9 : 16;
+  var h = format === "9:16" ? 16 : 9;
+  document.documentElement.style.setProperty("--cvs-w", w);
+  document.documentElement.style.setProperty("--cvs-h", h);
+}
+__novApplyCanvasFormat(__novCanvasFormat);
 function __novPersistAll(immediate) {
   window.__novSaveEnvelope(
-    { v: 1, main: __novMainState, presets: __novPresets, daAuth: __novDaAuth, twitchAuth: __novTwitchAuth },
+    { v: 1, main: __novMainState, presets: __novPresets, daAuth: __novDaAuth, twitchAuth: __novTwitchAuth, canvasFormat: __novCanvasFormat },
     immediate
   );
 }
@@ -1245,6 +1265,27 @@ if (NOV_MODE === "dashboard") {
   }
   novRenderProfileSelect();
 
+  // Переключатель формата кадра для ТЕКУЩЕГО профиля.
+  var novFmt169Btn = document.getElementById("novBtnFmt169");
+  var novFmt916Btn = document.getElementById("novBtnFmt916");
+  function novRenderFmtButtons(){
+    if (!novFmt169Btn || !novFmt916Btn) return;
+    var active = "border:1px solid var(--tc);background:rgba(234,179,8,.15);color:var(--tc);font-weight:bold";
+    var inactive = "border:1px solid #3f3f46;background:transparent;color:#aaa";
+    novFmt169Btn.style.cssText = "flex:1;padding:7px 0;border-radius:6px;font-size:11.5px;cursor:pointer;" + (__novCanvasFormat === "16:9" ? active : inactive);
+    novFmt916Btn.style.cssText = "flex:1;padding:7px 0;border-radius:6px;font-size:11.5px;cursor:pointer;" + (__novCanvasFormat === "9:16" ? active : inactive);
+  }
+  novRenderFmtButtons();
+  function novSetCanvasFormat(format){
+    if (format === __novCanvasFormat) return;
+    __novCanvasFormat = format;
+    __novApplyCanvasFormat(format);
+    novRenderFmtButtons();
+    __novPersistAll(false); // формат — часть того же JSON, что и раскладка, сохраняем сразу
+  }
+  if (novFmt169Btn) novFmt169Btn.addEventListener("click", function(){ novSetCanvasFormat("16:9"); });
+  if (novFmt916Btn) novFmt916Btn.addEventListener("click", function(){ novSetCanvasFormat("9:16"); });
+
   // Переключение профиля перезагружает страницу — так весь оверлей (включая
   // подключения DonationAlerts/Twitch) стартует заново и гарантированно
   // консистентно для нового профиля, без риска смешать состояние старого
@@ -1260,7 +1301,7 @@ if (NOV_MODE === "dashboard") {
 
   if (novNewProfileBtn) {
     novNewProfileBtn.addEventListener("click", function(){
-      showPrompt("Название нового профиля:", "Новый профиль", "Создать", function(name){
+      showNewProfileDialog(function(name, format){
         fetch("/api/profiles", {
           method: "POST", headers: {"content-type":"application/json"}, credentials:"same-origin",
           body: JSON.stringify({ name: name })
@@ -1268,8 +1309,17 @@ if (NOV_MODE === "dashboard") {
           .then(function(r){ return r.json(); })
           .then(function(body){
             if (body && body.profile) {
-              try { localStorage.setItem("nov_active_profile_id", String(body.profile.id)); } catch(e){}
-              location.reload();
+              // Формат кадра — это просто ещё одно поле в том же JSON,
+              // который и так хранит layout/presets/DA/Twitch для профиля,
+              // так что записываем его отдельным сохранением сразу после
+              // создания (профиль стартует с пустым состоянием).
+              return fetch("/api/profiles/" + body.profile.id + "/settings", {
+                method: "PUT", headers: {"content-type":"application/json"}, credentials:"same-origin",
+                body: JSON.stringify({ state: { v:1, main:{}, presets:{}, daAuth:null, twitchAuth:null, canvasFormat: format } })
+              }).then(function(){
+                try { localStorage.setItem("nov_active_profile_id", String(body.profile.id)); } catch(e){}
+                location.reload();
+              });
             } else {
               alert2(body && body.error === "too_many_profiles" ? "Достигнут лимит профилей." : "Не удалось создать профиль.");
             }
@@ -1385,20 +1435,23 @@ if (NOV_MODE === "dashboard") {
   // этом браузере (localStorage), никогда не уходит на сервер и не
   // попадает в общее состояние, которое рассылается на публичную
   // страницу оверлея. Поэтому в OBS/TikTok его в принципе не может
-  // быть видно, даже теоретически.
+  // быть видно, даже теоретически. По умолчанию — тёмный нейтральный
+  // фон (а не настоящая прозрачность): на просвет через прозрачный body
+  // иногда видно то, что находится под окном браузера, что выглядит как
+  // неровная "решётка" — сплошной тёмный фон убирает эту путаницу, а
+  // отметить оверлей полностью прозрачным (как в OBS) по-прежнему можно
+  // кнопкой ниже.
   var novBgKey = "nov_preview_bg";
+  var novDefaultBg = "#0a0a0a";
   var novBgColorInput = document.getElementById("novPreviewBgColor");
   var novBgOffBtn = document.getElementById("novPreviewBgOff");
   function novApplyPreviewBg(color){
-    document.body.style.background = color || "transparent";
+    document.body.style.background = color || novDefaultBg;
   }
-  try {
-    var novSavedBg = localStorage.getItem(novBgKey);
-    if (novSavedBg) {
-      novApplyPreviewBg(novSavedBg);
-      if (novBgColorInput) novBgColorInput.value = novSavedBg;
-    }
-  } catch(e){}
+  var novSavedBg = null;
+  try { novSavedBg = localStorage.getItem(novBgKey); } catch(e){}
+  novApplyPreviewBg(novSavedBg || novDefaultBg);
+  if (novBgColorInput) novBgColorInput.value = (novSavedBg && novSavedBg !== "transparent") ? novSavedBg : novDefaultBg;
   if (novBgColorInput) {
     novBgColorInput.addEventListener("input", function(){
       novApplyPreviewBg(novBgColorInput.value);
@@ -1407,8 +1460,8 @@ if (NOV_MODE === "dashboard") {
   }
   if (novBgOffBtn) {
     novBgOffBtn.addEventListener("click", function(){
-      novApplyPreviewBg(null);
-      try { localStorage.removeItem(novBgKey); } catch(e){}
+      novApplyPreviewBg("transparent");
+      try { localStorage.setItem(novBgKey, "transparent"); } catch(e){}
     });
   }
 
@@ -1709,6 +1762,75 @@ function showPrompt(message, defaultValue, confirmLabel, onConfirm){
   cancelBtn.addEventListener("click",function(){ box.remove(); });
   btnRow.appendChild(cancelBtn); btnRow.appendChild(okBtn);
   box.appendChild(msg); box.appendChild(input); box.appendChild(btnRow);
+  document.body.appendChild(box);
+  input.focus(); input.select();
+}
+// Диалог создания профиля: название + формат кадра (16:9 или 9:16).
+// Формат задаёт соотношение сторон холста — для 9:16 в OBS/TikTok нужно
+// также поставить вертикальное разрешение источника (например 1080x1920),
+// сам сайт под него подстроится.
+function showNewProfileDialog(onConfirm){
+  var old=el("ov6NewProfileBox"); if(old) old.remove();
+  var box=document.createElement("div");
+  box.id="ov6NewProfileBox";
+  box.style.cssText="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#161616;border:1px solid #333;border-radius:10px;padding:18px;max-width:300px;text-align:center;font-family:'Inter',sans-serif;z-index:99999999;box-shadow:0 10px 40px rgba(0,0,0,.6)";
+  var msg=document.createElement("p");
+  msg.textContent="Название нового профиля:";
+  msg.style.cssText="color:#f3f4f6;font-size:13px;margin:0 0 10px 0;line-height:1.4";
+  var input=document.createElement("input");
+  input.type="text";
+  input.value="9:16";
+  input.maxLength=60;
+  input.style.cssText="width:100%;background:#0a0a0a;border:1px solid #3f3f46;border-radius:6px;color:#fff;font-size:13px;padding:8px;margin-bottom:12px;box-sizing:border-box";
+  var fmtMsg=document.createElement("p");
+  fmtMsg.textContent="Формат кадра:";
+  fmtMsg.style.cssText="color:#f3f4f6;font-size:13px;margin:0 0 8px 0;text-align:left";
+  var fmtRow=document.createElement("div");
+  fmtRow.style.cssText="display:flex;gap:8px;margin-bottom:14px";
+  var format="16:9";
+  function makeFmtBtn(label, value){
+    var b=document.createElement("button");
+    b.textContent=label;
+    b.type="button";
+    function paint(){
+      b.style.cssText="flex:1;padding:8px 0;border-radius:6px;font-size:12px;cursor:pointer;border:1px solid " +
+        (format===value ? "var(--tc);background:rgba(234,179,8,.15);color:var(--tc);font-weight:bold" : "#3f3f46;background:transparent;color:#aaa");
+    }
+    b.addEventListener("click",function(){ format=value; paint(); paintAll(); });
+    paint();
+    return b;
+  }
+  var btn169=makeFmtBtn("16:9 горизонтальный","16:9");
+  var btn916=makeFmtBtn("9:16 вертикальный","9:16");
+  function paintAll(){
+    [btn169,btn916].forEach(function(b){
+      var value=b===btn169?"16:9":"9:16";
+      b.style.cssText="flex:1;padding:8px 0;border-radius:6px;font-size:12px;cursor:pointer;border:1px solid " +
+        (format===value ? "var(--tc);background:rgba(234,179,8,.15);color:var(--tc);font-weight:bold" : "#3f3f46;background:transparent;color:#aaa");
+    });
+  }
+  fmtRow.appendChild(btn169); fmtRow.appendChild(btn916);
+  var btnRow=document.createElement("div");
+  btnRow.style.cssText="display:flex;gap:8px;justify-content:center";
+  var cancelBtn=document.createElement("button");
+  cancelBtn.textContent="Отмена";
+  cancelBtn.style.cssText="flex:1;background:#2a2a2a;color:#fff;border:none;border-radius:6px;padding:8px 0;font-size:12px;cursor:pointer";
+  var okBtn=document.createElement("button");
+  okBtn.textContent="Создать";
+  okBtn.style.cssText="flex:1;background:var(--tc);color:#000;border:none;border-radius:6px;padding:8px 0;font-size:12px;font-weight:bold;cursor:pointer";
+  function submit(){
+    var val=input.value.trim();
+    if(!val) return;
+    box.remove();
+    onConfirm(val, format);
+  }
+  okBtn.addEventListener("click",submit);
+  input.addEventListener("keydown",function(e){ if(e.key==="Enter") submit(); });
+  cancelBtn.addEventListener("click",function(){ box.remove(); });
+  btnRow.appendChild(cancelBtn); btnRow.appendChild(okBtn);
+  box.appendChild(msg); box.appendChild(input);
+  box.appendChild(fmtMsg); box.appendChild(fmtRow);
+  box.appendChild(btnRow);
   document.body.appendChild(box);
   input.focus(); input.select();
 }
