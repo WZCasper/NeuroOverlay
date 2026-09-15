@@ -727,6 +727,10 @@ body.nov-editor-frame #cvs{
     <button id="btnCW" style="background:none;border:none;color:#555;font-size:1.1rem;cursor:pointer">✕</button>
   </div>
   <div class="wrow"><span class="wlbl">Текст в окне:</span><textarea class="inp" id="wTxt" rows="2" placeholder="Введите текст..."></textarea></div>
+  <div class="wrow" style="display:flex;gap:8px">
+    <div style="flex:1"><span class="wlbl">Ширина, px:</span><input type="number" class="inp" id="wNumW" min="10" max="4000" step="1"></div>
+    <div style="flex:1"><span class="wlbl">Высота, px:</span><input type="number" class="inp" id="wNumH" min="10" max="4000" step="1"></div>
+  </div>
   <div class="wrow" id="wTPRow" style="display:none"><span class="wlbl">Префикс (левая часть):</span><input type="text" class="inp" id="wTPref" placeholder="НАЗВАНИЕ СТРИМА: "></div>
   <div class="wrow"><span class="wlbl">Размер шрифта: <span id="lblWFS">16px</span></span><input type="range" class="rng" id="rWFS" min="6" max="150" value="16"></div>
   <div class="wrow" id="wIconFSRow" style="display:none"><span class="wlbl">Размер иконки: <span id="lblWIconFS">22px</span></span><input type="range" class="rng" id="rWIconFS" min="6" max="150" value="22"></div>
@@ -880,6 +884,8 @@ body.nov-editor-frame #cvs{
   <hr>
   <button data-ac="dh" style="color:#fbbf24">⬄ Равномерно X</button>
   <button data-ac="dv" style="color:#fbbf24">⬆ Равномерно Y</button>
+  <hr>
+  <button data-ac="dup">⧉ Дублировать</button>
   <hr>
   <button data-ac="zf">⬆ На передний план</button>
   <button data-ac="zb">⬇ На задний план</button>
@@ -2303,6 +2309,7 @@ document.querySelectorAll("#ctx button").forEach(function(btn){
     var ac=this.dataset.ac;
     if(ac==="hy"||ac==="hx"||ac==="ch"||ac==="cv") doAlign(ac);
     else if(ac==="dh"||ac==="dv") doDist(ac);
+    else if(ac==="dup") duplicateSelected();
     else if(ac==="zf") bringToFront();
     else if(ac==="zb") sendToBack();
     el("ctx").style.display="none";
@@ -2397,6 +2404,13 @@ function openWin(id){
   var isC=w.classList.contains("wcirc");
   el("wDRow").style.display=isC?"":"none";
   if(isC){var d=Math.round(w.getBoundingClientRect().width);el("rWD").value=d;el("lblWD").textContent=d+"px";}
+  // Числовые поля ширины/высоты — держим в пикселях, как реально
+  // отрисовано на холсте (после norm(), чтобы right/bottom-позиционирование
+  // не давало неверные цифры).
+  norm(w);
+  var wRect=w.getBoundingClientRect();
+  el("wNumW").value=Math.round(wRect.width);
+  el("wNumH").value=Math.round(wRect.height);
   var isTit=(id==="wTitle");
   el("wTPRow").style.display=isTit?"":"none";
   if(isTit){
@@ -2516,6 +2530,18 @@ el("rWFS").addEventListener("input",function(){
   var w=el(curWin);
   w.querySelectorAll(".wtxt, .mqcnt").forEach(function(t){t.style.fontSize=v+"px";});
 });
+// Точные ширина/высота окна числом — то же самое, что перетаскивание за
+// уголок ресайза, но с точным значением в пикселях вместо "на глаз".
+function novApplyWH(){
+  if(!curWin) return;
+  var w=el(curWin); if(!w) return;
+  var nw=parseInt(el("wNumW").value,10), nh=parseInt(el("wNumH").value,10);
+  if(!isNaN(nw)) w.style.width=Math.max(10,nw)+"px";
+  if(!isNaN(nh)) w.style.height=Math.max(10,nh)+"px";
+  schedSave();
+}
+el("wNumW").addEventListener("input",novApplyWH);
+el("wNumH").addEventListener("input",novApplyWH);
 // Размер иконки (соцсети) — независим от размера текста. Сам .wicon получает
 // font-size, а вложенные i/img/svg сами масштабируются через 1em (см. CSS),
 // поэтому достаточно менять только размер обёртки.
@@ -3181,6 +3207,48 @@ function addCustomWindow(circle, isWebcam){
 el("btnAW").addEventListener("click",function(){ addCustomWindow(false); });
 el("btnAWC").addEventListener("click",function(){ addCustomWindow(true); });
 el("btnAWebcam").addEventListener("click",function(){ addCustomWindow(false, true); });
+// Дублирование окна по правой кнопке (пункт "Дублировать" в контекстном
+// меню #ctx). Работает через клонирование DOM-узла — благодаря тому что
+// перетаскивание/ресайз/шестерёнка настроек навешаны на #cvs через
+// делегирование событий (а не на каждый .dwin отдельно), копия сразу
+// становится полноценным независимым окном без лишней проводки.
+function duplicateWindow(id){
+  var src=el(id); if(!src) return null;
+  norm(src);
+  dynN++;
+  var newId="cw"+dynN;
+  var clone=src.cloneNode(true);
+  clone.id=newId;
+  clone.classList.remove("sel");
+  var curLeft=parseFloat(src.style.left)||0, curTop=parseFloat(src.style.top)||0;
+  clone.style.left=(curLeft+24)+"px";
+  clone.style.top=(curTop+24)+"px";
+  clone.style.right="unset"; clone.style.bottom="unset";
+  var gear=clone.querySelector(".gear"); if(gear) gear.dataset.id=newId;
+  // Любые вложенные id вида "<старый_id>_..." (медиа-плейсхолдер,
+  // REC-индикатор и т.п.) переносим под новый id тем же суффиксом.
+  clone.querySelectorAll("[id]").forEach(function(sub){
+    if(sub.id.indexOf(id+"_")===0) sub.id=newId+sub.id.slice(id.length);
+  });
+  (el("dynW")||cvs).appendChild(clone);
+  WS[newId]=JSON.parse(JSON.stringify(getWS(id)));
+  WS[newId].dyn=true;
+  return newId;
+}
+function duplicateSelected(){
+  if(!selWins.length) return;
+  var newIds=[];
+  selWins.slice().forEach(function(id){
+    var nid=duplicateWindow(id);
+    if(nid) newIds.push(nid);
+  });
+  if(!newIds.length) return;
+  document.querySelectorAll(".dwin.sel").forEach(function(w){w.classList.remove("sel");});
+  selWins=newIds;
+  newIds.forEach(function(id){ var w=el(id); if(w) w.classList.add("sel"); });
+  el("ctxN").textContent=selWins.length;
+  schedSave();
+}
 el("tSnap").addEventListener("click",function(){
   this.classList.toggle("on"); snapEnabled=this.classList.contains("on");
   if(!snapEnabled) hideSnapGuides();
