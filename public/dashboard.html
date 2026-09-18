@@ -330,12 +330,14 @@ body.nov-editor-frame #cvs{
       <input type="text" class="inp" id="novOverlayUrl" readonly style="flex:1;font-family:monospace;font-size:10.5px" onclick="this.select()">
       <button id="novBtnCopyUrl" style="padding:0 12px;background:var(--tc);color:#000;border:none;border-radius:6px;font-size:12px;font-weight:bold;cursor:pointer;white-space:nowrap">Копировать</button>
     </div>
-    <button id="novBtnRegenUrl" style="width:100%;padding:7px;background:transparent;color:#aaa;font-weight:600;border:1px solid #3f3f46;border-radius:6px;font-size:11.5px;cursor:pointer;margin-bottom:10px">🔄 Обновить ссылку (старая перестанет работать)</button>
+    <button id="novBtnRegenUrl" style="width:100%;padding:7px;background:transparent;color:#aaa;font-weight:600;border:1px solid #3f3f46;border-radius:6px;font-size:11.5px;cursor:pointer;margin-bottom:8px">🔄 Обновить ссылку (старая перестанет работать)</button>
+    <button id="novBtnPreview" style="width:100%;padding:7px;background:transparent;color:var(--tc);font-weight:600;border:1px solid var(--tc);border-radius:6px;font-size:11.5px;cursor:pointer;margin-bottom:10px">👁 Предпросмотр оверлея (новая вкладка)</button>
     <p class="cinfo" id="novAccountWho" style="margin:0 0 8px 0"></p>
-    <div style="display:flex;gap:6px">
+    <div style="display:flex;gap:6px;margin-bottom:6px">
       <a id="novAdminLink" href="/admin" style="display:none;flex:1;text-align:center;padding:7px;background:#1a2a1a;color:#22c55e;border:1px solid #22c55e;border-radius:6px;font-size:11.5px;text-decoration:none;font-weight:bold">⚙ Админ-панель</a>
       <button id="novBtnLogout" style="flex:1;padding:7px;background:#7f1d1d;color:#fff;border:none;border-radius:6px;font-size:11.5px;cursor:pointer">Выйти</button>
     </div>
+    <button id="novBtnLogoutAll" style="width:100%;padding:6px;background:transparent;color:#888;border:none;font-size:10.5px;cursor:pointer;text-decoration:underline">Выйти со всех устройств</button>
   </div>
 
   <!-- ФОН ХОЛСТА ДЛЯ УДОБСТВА РЕДАКТИРОВАНИЯ (только в личном кабинете) -->
@@ -1450,6 +1452,24 @@ if (NOV_MODE === "dashboard") {
     novLogoutBtn.addEventListener("click", function(){
       showConfirm("Выйти из личного кабинета?", "Выйти", function(){
         fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" })
+          .then(function(){ location.href = "/"; })
+          .catch(function(){ location.href = "/"; });
+      });
+    });
+  }
+
+  var novPreviewBtn = document.getElementById("novBtnPreview");
+  if (novPreviewBtn) {
+    novPreviewBtn.addEventListener("click", function(){
+      window.open(novOverlayUrl(), "_blank");
+    });
+  }
+
+  var novLogoutAllBtn = document.getElementById("novBtnLogoutAll");
+  if (novLogoutAllBtn) {
+    novLogoutAllBtn.addEventListener("click", function(){
+      showConfirm("Выйти со ВСЕХ устройств, где вы входили в этот аккаунт? Понадобится войти через Telegram заново на каждом из них.", "Выйти везде", function(){
+        fetch("/api/auth/logout-all", { method: "POST", credentials: "same-origin" })
           .then(function(){ location.href = "/"; })
           .catch(function(){ location.href = "/"; });
       });
@@ -5068,6 +5088,7 @@ document.addEventListener("keydown",function(e){
 });
 
 function setupWarzonePreset(){
+  if (__novCanvasFormat !== "16:9") return; // демо-раскладка рассчитана на 16:9, в 9:16 её не создаём
   var presets=getPresets();
   if(presets["СТРИМ ВЕДУЩИЙ"]) return; // уже создан — не перезаписываем
   var backup=buildState();
@@ -5130,6 +5151,7 @@ function setupWarzonePreset(){
 // ══ файла ОВЕРЛЕЙ.html (правая колонка: вебкамера+чат, нижняя панель ══
 // ══ соцсетей и бегущей строки, золотая тема, шрифт Teko) ══════════
 function setupTransferredPreset(){
+  if (__novCanvasFormat !== "16:9") return; // рассчитан на 16:9
   var presets=getPresets();
   if(presets["NEW"]) return; // уже создан — не перезаписываем
   var backup=buildState();
@@ -5248,7 +5270,28 @@ if(!hadSavedState){ addTicker(); addPopup(); }
 // Оба демо-пресета собираются строго по очереди в одном таймере — обе
 // функции синхронные (без await/Promise внутри), поэтому порядок
 // выполнения гарантирован и они не мешают друг другу
-setTimeout(function(){ setupWarzonePreset(); setupTransferredPreset(); }, 150); // после отложенного восстановления позиций (80мс)
+// Стартовый шаблон для вертикального формата (9:16) — камера сверху,
+// ник под ней. Простая, безопасная база, которую легко донастроить под
+// себя; срабатывает один раз для профиля в формате 9:16, если такого
+// пресета там ещё нет. Тот же принцип, что и у Warzone-пресета выше:
+// временно переставить, снять снимок в пресет, вернуть как было.
+function setupVerticalPreset(){
+  if (NOV_MODE !== "dashboard" || __novCanvasFormat !== "9:16") return;
+  var existing = getPresets();
+  if (existing["Вертикальный старт"]) return;
+  var backup = buildState();
+  var cam = el("wCam");
+  if (cam) { cam.style.left="15%"; cam.style.top="4%"; cam.style.width="70%"; cam.style.height="35%"; cam.style.right="unset"; cam.style.bottom="unset"; }
+  var nick = el("wNick");
+  if (nick) { nick.style.left="10%"; nick.style.top="42%"; nick.style.width="80%"; nick.style.height="8%"; nick.style.right="unset"; nick.style.bottom="unset"; }
+  var snapshot = buildState();
+  var presets = getPresets();
+  presets["Вертикальный старт"] = { savedAt: Date.now(), state: snapshot };
+  savePresetsMap(presets);
+  applyState(backup);
+  if (typeof renderPresetList === "function") renderPresetList();
+}
+setTimeout(function(){ setupWarzonePreset(); setupTransferredPreset(); setupVerticalPreset(); if (typeof renderPresetList === "function") renderPresetList(); }, 150); // после отложенного восстановления позиций (80мс)
 
 // Восстановление подключения DonationAlerts (независимо от лейаута/пресетов)
 (function initDaAuth(){

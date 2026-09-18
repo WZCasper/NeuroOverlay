@@ -1,0 +1,41 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply migrations to a local D1 database
+        run: |
+          npx wrangler d1 execute neuroverlay --file=migrations/0001_init.sql --local
+          npx wrangler d1 execute neuroverlay --file=migrations/0002_profiles.sql --local
+
+      - name: Start the Worker (background)
+        run: |
+          cp .dev.vars.example .dev.vars
+          nohup npx wrangler dev --port 8787 > wrangler.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -s http://localhost:8787/api/health && break
+            sleep 1
+          done
+
+      - name: Run smoke tests
+        run: node scripts/smoke-test.mjs
+
+      - name: Show Worker logs on failure
+        if: failure()
+        run: cat wrangler.log
