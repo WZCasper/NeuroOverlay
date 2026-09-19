@@ -7,6 +7,13 @@ function randomId(bytes = 32) {
   return [...arr].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+// Expired rows are never read again (getSessionUser filters on expires_at),
+// but without cleanup the table only ever grows. Run the purge on a small
+// fraction of logins so it costs nothing on the hot path.
+export async function purgeExpiredSessions(db) {
+  await db.prepare("DELETE FROM sessions WHERE expires_at <= datetime('now')").run();
+}
+
 export async function createSession(db, userId) {
   const id = randomId(32);
   const expiresAt = new Date(Date.now() + SESSION_TTL_DAYS * 86400000).toISOString();

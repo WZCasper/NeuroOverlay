@@ -1,7 +1,8 @@
 import { verifyTelegramLogin } from "../telegram.js";
-import { createSession, destroySession, sessionCookieHeader, clearSessionCookieHeader, readSessionIdFromRequest } from "../session.js";
+import { createSession, destroySession, purgeExpiredSessions, sessionCookieHeader, clearSessionCookieHeader, readSessionIdFromRequest } from "../session.js";
 import { json, isHttps, randomToken } from "../http.js";
 import { sendTelegramMessage } from "../telegram-notify.js";
+import { escapeTelegramHtml, readJsonLimited } from "../security.js";
 import { DEFAULT_PROFILE_NAME } from "./profiles.js";
 
 function serializeUser(user) {
@@ -25,8 +26,13 @@ async function notifyAdminsOfNewUser(env, ctx, newUser) {
     .all();
   if (!results || results.length === 0) return;
 
-  const name = [newUser.first_name, newUser.last_name].filter(Boolean).join(" ") || "(без имени)";
-  const handle = newUser.username ? "@" + newUser.username : "username не указан";
+  // The message is sent with parse_mode=HTML, so every user-controlled value
+  // must be escaped -- otherwise a first name like "<a href=...>" would inject
+  // markup (or make Telegram reject the whole message) in the admin's chat.
+  const name = escapeTelegramHtml(
+    [newUser.first_name, newUser.last_name].filter(Boolean).join(" ") || "(без имени)"
+  );
+  const handle = newUser.username ? "@" + escapeTelegramHtml(newUser.username) : "username не указан";
   const text = `🆕 Новый пользователь NeuroOverlay\n${name} (${handle})`;
 
   for (const row of results) {
@@ -38,12 +44,12 @@ export async function handleTelegramLogin(request, env, ctx) {
   const botToken = env.TELEGRAM_BOT_TOKEN;
   if (!botToken) return json({ error: "server_missing_bot_token" }, { status: 500 });
 
-  let payload;
-  try {
-    payload = await request.json();
-  } catch {
-    return json({ error: "invalid_json" }, { status: 400 });
-  }
+  // A real Telegram login payload is well under 1 KB; cap the body hard so
+  // this unauthenticated endpoint can't be used to make the Worker chew on
+  // huge requests.
+  const body = await readJsonLimited(request, 8 * 1024);
+  if (!body.ok) return json({ error: body.error }, { status: body.status });
+  const payload = body.value;
 
   const result = await verifyTelegramLogin(payload, botToken);
   if (!result.ok) {
@@ -92,6 +98,9 @@ export async function handleTelegramLogin(request, env, ctx) {
   }
 
   const session = await createSession(db, user.id);
+  if (ctx && Math.random() < 0.05) {
+    ctx.waitUntil(purgeExpiredSessions(db).catch((e) => console.error("[sessions] purge failed", e)));
+  }
   return json(
     { user: serializeUser(user) },
     { headers: { "set-cookie": sessionCookieHeader(session.id, session.expiresAt, { secure: isHttps(request) }) } }

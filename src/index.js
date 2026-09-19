@@ -1,5 +1,6 @@
 import { readSessionIdFromRequest, getSessionUser } from "./session.js";
 import { json } from "./http.js";
+import { isSameOriginRequest } from "./security.js";
 import { handleTelegramLogin, handleLogout, handleMe } from "./routes/auth.js";
 import {
   handleListProfiles,
@@ -41,6 +42,11 @@ export default {
     const method = request.method;
 
     try {
+      // ---- CSRF: state-changing API calls must come from our own origin ----
+      if (path.startsWith("/api/") && !isSameOriginRequest(request)) {
+        return json({ error: "bad_origin" }, { status: 403 });
+      }
+
       // ---- WebSocket (Durable Object) ----
       let m = path.match(/^\/ws\/overlay\/([A-Za-z0-9_-]+)$/);
       if (m) {

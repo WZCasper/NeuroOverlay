@@ -1,4 +1,5 @@
 import { json } from "../http.js";
+import { escapeLike } from "../security.js";
 
 function serializeAdminUser(user) {
   return {
@@ -23,11 +24,15 @@ export async function handleListUsers(request, env, ctx, user) {
 
   let result;
   if (q) {
+    // Escape % and _ so a search for "50%" or "a_b" is matched literally
+    // instead of acting as a wildcard.
+    const like = `%${escapeLike(q)}%`;
     result = await env.DB.prepare(
-      `SELECT * FROM users WHERE username LIKE ? OR first_name LIKE ? OR telegram_id = ?
+      `SELECT * FROM users
+       WHERE username LIKE ? ESCAPE '\\' OR first_name LIKE ? ESCAPE '\\' OR telegram_id = ?
        ORDER BY created_at DESC LIMIT 50`
     )
-      .bind(`%${q}%`, `%${q}%`, q)
+      .bind(like, like, q)
       .all();
   } else {
     result = await env.DB.prepare("SELECT * FROM users ORDER BY created_at DESC LIMIT 50").all();
