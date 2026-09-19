@@ -1728,6 +1728,41 @@ var chatCPUpdate, lmCPUpdate, wCPUpdate, wBgCPUpdate;
 
 // ══ HELPERS ════════════════════════════════════════════
 function el(id){ return document.getElementById(id); }
+
+// ══ SECURITY HELPERS ═══════════════════════════════════
+// Saved layouts come from storage, from pasted preset codes and from the live
+// sync socket, so their text/URLs must be treated as untrusted DATA: they are
+// escaped before being put into innerHTML, and anything that ends up in an
+// element id or an iframe/img src is validated first. Without this, a preset
+// code containing markup runs script on the site the moment it is applied.
+function escHtml(v){
+  return String(v == null ? "" : v)
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+// Element ids created by this app are always a short word + a counter
+// (tick3, pop2, cw7 ...). Anything else is refused rather than escaped, so an
+// id can never be used to break out of an attribute or a CSS selector.
+function safeId(v){
+  var s = String(v == null ? "" : v);
+  return /^[A-Za-z][A-Za-z0-9_]{0,40}$/.test(s) ? s : "";
+}
+// Only http(s) links may be embedded (iframe / img). This blocks javascript:,
+// data:text/html, vbscript: and similar schemes. Returns "" when not allowed.
+function safeUrl(v){
+  var s = String(v == null ? "" : v).trim();
+  if(!s) return "";
+  try{
+    var u = new URL(s, location.href);
+    return (u.protocol === "http:" || u.protocol === "https:") ? u.href : "";
+  }catch(e){ return ""; }
+}
+// Same, but for values that may legitimately be a data:image/... upload.
+function safeImgUrl(v){
+  var s = String(v == null ? "" : v).trim();
+  if(/^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+\/=]+$/i.test(s)) return s;
+  return safeUrl(s);
+}
 function sv(k,v){ document.documentElement.style.setProperty(k,v); }
 function hex2rgb(hex){
   hex=(hex||"").replace("#","");
@@ -2630,12 +2665,14 @@ el("wUrl").addEventListener("input",function(){
   med.innerHTML="";
   if(!url) return;
   var rxImg=/\.(jpg|jpeg|png|gif|webp|svg)$/i;
+  var okUrl=safeImgUrl(url);
+  if(!okUrl) return; // javascript:, data:text/html, etc. are never embedded
   if(rxImg.test(url)){
-    var img=document.createElement("img");img.src=url;
+    var img=document.createElement("img");img.src=okUrl;
     img.style.cssText="width:100%;height:100%;object-fit:cover;border:none"+(isC?";border-radius:50%":"");
     med.appendChild(img);
   } else {
-    var fr=document.createElement("iframe");fr.src=url;fr.style.cssText="width:100%;height:100%;border:none";
+    var fr=document.createElement("iframe");fr.src=safeUrl(url);fr.style.cssText="width:100%;height:100%;border:none";
     med.appendChild(fr);
   }
   w.querySelectorAll(".gear,.rs").forEach(function(r){r.style.zIndex="30";});
@@ -3046,7 +3083,9 @@ function applyChatSource(){
   }
   msgs.style.display="none";
   box.style.display="block";
-  box.innerHTML='<iframe src="'+url+'" style="width:100%;height:100%;border:none" allow="autoplay"></iframe>';
+  var safeChat=safeUrl(url);
+  if(!safeChat){ box.style.display="none"; box.innerHTML=""; msgs.style.display="flex"; return; }
+  box.innerHTML='<iframe src="'+escHtml(safeChat)+'" style="width:100%;height:100%;border:none" allow="autoplay"></iframe>';
 }
 el("btnChatSrc").addEventListener("click",function(e){e.stopPropagation();openDD("ddChatSrc");});
 el("ddChatSrc").addEventListener("click",function(e){
@@ -3085,7 +3124,8 @@ function applyViewersEmbed(){
   } else {
     if(nativeWrap) nativeWrap.style.display="none";
     box.style.display="";
-    box.innerHTML = (viewersOn && viewersUrl) ? '<iframe src="'+viewersUrl+'" style="width:100%;height:100%;border:none" allow="autoplay"></iframe>' : "";
+    var safeViewers=safeUrl(viewersUrl);
+    box.innerHTML = (viewersOn && safeViewers) ? '<iframe src="'+escHtml(safeViewers)+'" style="width:100%;height:100%;border:none" allow="autoplay"></iframe>' : "";
   }
 }
 function setViewersMode(mode){
@@ -3118,7 +3158,8 @@ var daWidgetOn=false, daWidgetUrl="";
 function applyDaWidgetEmbed(){
   var box=el("daWidgetEmbed"), w=el("wDaWidget"); if(!box||!w) return;
   w.style.display=daWidgetOn?"block":"none";
-  box.innerHTML = (daWidgetOn && daWidgetUrl) ? '<iframe src="'+daWidgetUrl+'" style="width:100%;height:100%;border:none" allow="autoplay"></iframe>' : "";
+  var safeDa=safeUrl(daWidgetUrl);
+  box.innerHTML = (daWidgetOn && safeDa) ? '<iframe src="'+escHtml(safeDa)+'" style="width:100%;height:100%;border:none" allow="autoplay"></iframe>' : "";
 }
 el("tDaWidgetOn").addEventListener("click",function(){
   this.classList.toggle("on"); daWidgetOn=this.classList.contains("on");
@@ -3342,7 +3383,8 @@ function rebuildTick(id,row){
   var ii=row.querySelector("input[type=text]");
   var txt=ta?ta.value:"",img=ii?ii.value.trim():"";
   var rxImg=/\.(jpg|jpeg|png|gif|webp|svg)$/i;
-  var chunk="<span>"+txt+"</span>"+(img&&rxImg.test(img)?'<img src="'+img+'">':'');
+  var safeImg=safeImgUrl(img);
+  var chunk="<span>"+escHtml(txt)+"</span>"+(safeImg&&rxImg.test(img)?'<img src="'+escHtml(safeImg)+'">':'');
   var mc=el(id+"_mc");if(mc)mc.innerHTML=chunk;
 }
 
@@ -3393,7 +3435,8 @@ function addPopup(){
 function updPop(id,v){
   var med=el(id+"_m"),txt=el(id+"_t");
   var rxImg=/\.(jpg|jpeg|png|gif|webp|svg)$/i;
-  if(rxImg.test(v)){if(med)med.innerHTML='<img src="'+v+'" style="width:100%;height:100%;object-fit:contain">';if(txt)txt.textContent="";}
+  var sv2=safeImgUrl(v);
+  if(sv2&&rxImg.test(v)){if(med)med.innerHTML='<img src="'+escHtml(sv2)+'" style="width:100%;height:100%;object-fit:contain">';if(txt)txt.textContent="";}
   else{if(med)med.innerHTML="";if(txt)txt.textContent=v;}
 }
 
@@ -3616,23 +3659,24 @@ function restoreCustomWindow(id, ws){
   } else {
     inner=gH2(id)+'<div class="wmedia" id="'+id+'_m"'+mediaStyle+'></div>'+
       '<div class="wcnt" style="position:relative;z-index:2">'+
-      '<span class="wtxt" style="font-family:var(--fc);font-weight:var(--fw);color:#fff;font-size:14px">'+((ws&&ws.txt)?ws.txt:"Окно")+'</span></div>'+rsH();
+      '<span class="wtxt" style="font-family:var(--fc);font-weight:var(--fw);color:#fff;font-size:14px">'+escHtml((ws&&ws.txt)?ws.txt:"Окно")+'</span></div>'+rsH();
   }
   var w=mkDiv(id,cls,style,inner);
   el("dynW").appendChild(w);
 }
 
 function restoreTicker(tc){
-  var id   = tc.id;
+  var id   = safeId(tc.id);
+  if(!id) return;
   var exT=el(id); if(exT) exT.remove();
   var exRow=el("cfgt_"+id); if(exRow) exRow.remove();
   var txt  = tc.text || "Бегущая строка";
-  var spd  = tc.speed || "4";
+  var spd  = parseFloat(tc.speed); if(!isFinite(spd) || spd<=0) spd = 4;
   var w    = mkDiv(id,"dwin wb wbg","left:5%;top:70%;width:60%;height:42px",
     gH2(id)+
     '<div class="mqwrap"><div class="mqcnt" id="'+id+'_mc"'+
-    ' style="font-family:var(--fc);font-weight:var(--fw);color:#fff;font-size:15px;animation:marq '+(parseFloat(spd)*2)+'s linear infinite">'+
-    '<span>'+txt+'</span></div></div>'+rsH());
+    ' style="font-family:var(--fc);font-weight:var(--fw);color:#fff;font-size:15px;animation:marq '+(spd*2)+'s linear infinite">'+
+    '<span>'+escHtml(txt)+'</span></div></div>'+rsH());
   el("dynT").appendChild(w);
   updateTickerWidth(w);
 
@@ -3644,8 +3688,8 @@ function restoreTicker(tc){
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">'+
     '<span style="font-size:11px;font-weight:bold;color:#fff">Строка '+num+'</span>'+
     '<button data-tid="'+id+'" class="tickDelBtn" style="background:#7f1d1d;color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:10px;cursor:pointer">✕</button></div>'+
-    '<textarea class="inp" rows="2" style="margin-bottom:4px">'+txt+'</textarea>'+
-    '<input type="text" class="inp" value="'+(tc.img||"")+'" placeholder="URL картинки внутри строки..." style="margin-bottom:4px">'+
+    '<textarea class="inp" rows="2" style="margin-bottom:4px">'+escHtml(txt)+'</textarea>'+
+    '<input type="text" class="inp" value="'+escHtml(tc.img||"")+'" placeholder="URL картинки внутри строки..." style="margin-bottom:4px">'+
     '<div style="display:flex;align-items:center;gap:6px;font-size:10px;color:#888">'+
     'Скорость:<input type="range" class="rng" style="flex:1" min="0.5" max="12" step="0.1" value="'+spd+'"></div>';
   row.querySelector("textarea").addEventListener("input",function(){ rebuildTick(id,row); });
@@ -3664,18 +3708,23 @@ function restoreTicker(tc){
     });
   });
   el("tickList").appendChild(row);
+  // Раньше картинка внутри строки при загрузке не восстанавливалась (рисовался
+  // только текст) — она появлялась лишь после нового ввода в поле. rebuildTick
+  // строит и текст, и картинку по одним и тем же (проверенным) правилам.
+  if(tc.img) rebuildTick(id,row);
 }
 
 function restorePopup(pc){
-  var id  = pc.id;
+  var id  = safeId(pc.id);
+  if(!id) return;
   var exP=el(id); if(exP) exP.remove();
   var exRowP=el("cfgp_"+id); if(exRowP) exRowP.remove();
   var txt = pc.text || "Попап";
-  var dur = pc.dur  || "5";
+  var dur = parseInt(pc.dur, 10); if(!isFinite(dur) || dur<1) dur = 5;
   var w   = mkDiv(id,"dwin wb wbg","left:35%;top:32%;width:25%;height:18%;display:none;align-items:center;justify-content:center",
     gH2(id)+'<div class="wmedia" id="'+id+'_m"></div>'+
     '<div class="wcnt" style="justify-content:center;position:relative;z-index:2">'+
-    '<span id="'+id+'_t" class="wtxt" style="font-family:var(--fc);font-weight:var(--fw);color:#fff;font-size:22px;text-align:center">'+txt+'</span>'+
+    '<span id="'+id+'_t" class="wtxt" style="font-family:var(--fc);font-weight:var(--fw);color:#fff;font-size:22px;text-align:center">'+escHtml(txt)+'</span>'+
     '</div>'+rsH());
   el("dynP").appendChild(w);
 
@@ -3687,7 +3736,7 @@ function restorePopup(pc){
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">'+
     '<span style="font-size:11px;font-weight:bold;color:#fff">Попап '+num+'</span>'+
     '<button data-pid="'+id+'" class="popDelBtn" style="background:#7f1d1d;color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:10px;cursor:pointer">✕</button></div>'+
-    '<input type="text" class="inp" value="'+txt+'" placeholder="Текст или URL..." style="margin-bottom:4px">'+
+    '<input type="text" class="inp" value="'+escHtml(txt)+'" placeholder="Текст или URL..." style="margin-bottom:4px">'+
     '<div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#aaa">'+
     'Показ (сек):<input type="number" value="'+dur+'" min="1" style="width:42px;background:#000;border:1px solid #2a2a2a;border-radius:3px;padding:3px;color:#fff;text-align:center;margin:0 4px">'+
     '<button class="popTestBtn" data-pid="'+id+'" style="background:var(--tc);color:#000;font-weight:700;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px">Тест</button></div>';
@@ -3749,8 +3798,10 @@ function applyWS(id){
     var med=el(id+"_m"); if(!med){med=document.createElement("div");med.id=id+"_m";med.className="wmedia";w.insertBefore(med,w.firstChild);}
     med.innerHTML="";
     var rxImg=/\.(jpg|jpeg|png|gif|webp|svg)$/i;
-    if(rxImg.test(ws.url)){var img=document.createElement("img");img.src=ws.url;img.style.cssText="width:100%;height:100%;object-fit:cover;border:none";med.appendChild(img);}
-    else{var fr=document.createElement("iframe");fr.src=ws.url;fr.style.cssText="width:100%;height:100%;border:none";med.appendChild(fr);}
+    var okWsUrl=safeImgUrl(ws.url);
+    if(!okWsUrl){ /* unsafe scheme: leave the window without media */ }
+    else if(rxImg.test(ws.url)){var img=document.createElement("img");img.src=okWsUrl;img.style.cssText="width:100%;height:100%;object-fit:cover;border:none";med.appendChild(img);}
+    else{var fr=document.createElement("iframe");fr.src=safeUrl(ws.url);fr.style.cssText="width:100%;height:100%;border:none";med.appendChild(fr);}
   }
 }
 
@@ -3782,7 +3833,7 @@ function applyState(s){
     deletedIds = deletedIds.filter(function(id){ return id!=="wMapRot" && id!=="wTimer" && id!=="wChat" && id!=="wViewers" && id!=="wDaWidget"; });
     deletedIds.forEach(function(id){
       var w=el(id); if(w) w.remove();
-      if(id.indexOf("sw_")===0){
+      if(id.indexOf("sw_")===0 && safeId(id)){
         var tgl=document.querySelector("[data-w='"+id+"']");
         if(tgl){ var row=tgl.closest(".clabel"); if(row) row.remove(); }
       }
@@ -3803,6 +3854,7 @@ function applyState(s){
 
     // Restore social windows
     if(s.socOn) s.socOn.forEach(function(wid){
+      if(!safeId(wid)) return;
       var w=el(wid); if(!w) return;
       w.style.display="flex";
       var tgl=document.querySelector("[data-w='"+wid+"']");
@@ -4334,9 +4386,9 @@ function daSetStatus(text){ var s=el("daStatus"); if(s) s.textContent="Стат�
     var msgType = isTwitch ? "ov6_twitch_token" : "ov6_da_token";
     var errType = isTwitch ? "ov6_twitch_error" : "ov6_da_error";
     if(params.access_token){
-      window.opener.postMessage({type:msgType, token:params.access_token}, "*");
+      window.opener.postMessage({type:msgType, token:params.access_token}, location.origin);
     } else if(location.hash.indexOf("error=")!==-1){
-      window.opener.postMessage({type:errType, error:params.error||"unknown"}, "*");
+      window.opener.postMessage({type:errType, error:params.error||"unknown"}, location.origin);
     }
     document.write("Готово, можно закрыть окно.");
     window.close();
@@ -4936,6 +4988,10 @@ el("importBkFile").addEventListener("change",function(){
 // UI wiring
 window.addEventListener("message", function(ev){
   if(!ev.data) return;
+  // Tokens and status messages are only ever sent by our own OAuth popup,
+  // which is on this same origin. Anything else claiming an ov6_ type is
+  // an attempt to inject a token (or spoof a status) from another site.
+  if(typeof ev.data.type==="string" && ev.data.type.indexOf("ov6_")===0 && ev.origin!==location.origin) return;
   if(ev.data.type==="ov6_da_token"){
     daToken=ev.data.token;
     saveDaAuth(daClientId, daToken, "", "");
