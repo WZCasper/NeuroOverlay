@@ -6,6 +6,16 @@ const BASE = process.env.SMOKE_TEST_BASE_URL || "http://localhost:8787";
 const WS_BASE = BASE.replace(/^http/, "ws");
 const BOT_TOKEN = "1234567890:TEST_TOKEN_FOR_LOCAL_SMOKE_TEST_ONLY";
 
+// A real browser always attaches an Origin header to state-changing requests
+// (and the Worker rejects cookie-authenticated ones without it -- that is the
+// CSRF defence). Node's fetch sends none, so add it the way a browser would.
+// Individual checks below can still override it to simulate an attacker.
+const realFetch = globalThis.fetch;
+globalThis.fetch = (url, init = {}) => {
+  const headers = { origin: BASE, ...(init.headers || {}) };
+  return realFetch(url, { ...init, headers });
+};
+
 let passed = 0;
 function ok(label) {
   passed++;
@@ -203,6 +213,46 @@ async function main() {
     const res = await fetch(`${BASE}/api/profiles/${profile1.id}/settings`, { headers: { cookie: other.cookie } });
     assert.strictEqual(res.status, 404);
     ok("a user cannot read another user's profile settings");
+  }
+
+  // ---- CSRF: cookie-authenticated writes from a foreign origin are refused ----
+  {
+    const csrfUser = await login(980003);
+    const list = await (await fetch(`${BASE}/api/profiles`, { headers: { cookie: csrfUser.cookie } })).json();
+    const pid = list.profiles[0].id;
+    const attempt = (headers) =>
+      fetch(`${BASE}/api/profiles/${pid}/settings`, {
+        method: "PUT",
+        headers: { "content-type": "application/json", cookie: csrfUser.cookie, ...headers },
+        body: JSON.stringify({ state: { v: 1, hacked: true } }),
+      });
+
+    assert.strictEqual((await attempt({ origin: "https://evil.example" })).status, 403);
+    assert.strictEqual((await attempt({ origin: "null" })).status, 403);
+    assert.strictEqual((await attempt({ origin: "", referer: "https://evil.example/page" })).status, 403);
+    const stillClean = await (await fetch(`${BASE}/api/profiles/${pid}/settings`, { headers: { cookie: csrfUser.cookie } })).json();
+    assert.notStrictEqual(stillClean.state.hacked, true, "a blocked cross-origin write must not change any data");
+    assert.strictEqual((await attempt({})).status, 200);
+    ok("cross-origin writes with a session cookie are rejected (CSRF), same-origin still works");
+  }
+
+  // ---- Oversized login bodies are refused before any crypto/DB work ----
+  {
+    const big = "x".repeat(20 * 1024);
+    const res = await fetch(`${BASE}/api/auth/telegram`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: 1, first_name: big }),
+    });
+    assert.strictEqual(res.status, 413);
+    ok("oversized login body is rejected with 413");
+  }
+
+  // ---- Admin endpoint is closed to non-admins (LIKE escaping itself is unit-tested separately) ----
+  {
+    const res = await fetch(`${BASE}/api/admin/users?q=%25`, { headers: { cookie } });
+    assert.strictEqual(res.status, 403, "non-admin must not reach the user list");
+    ok("admin user list is closed to non-admin accounts");
   }
 
   console.log(`\nAll ${passed} smoke test checks passed.`);

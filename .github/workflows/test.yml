@@ -19,14 +19,24 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Run unit tests
+        run: npm run unit-test
+
+      - name: Run XSS / regression tests on the overlay page
+        run: npm run xss-test
+
       - name: Apply migrations to a local D1 database
         run: |
-          npx wrangler d1 execute neuroverlay --file=migrations/0001_init.sql --local
-          npx wrangler d1 execute neuroverlay --file=migrations/0002_profiles.sql --local
+          npm run db:migrate:local
 
       - name: Start the Worker (background)
         run: |
-          cp .dev.vars.example .dev.vars
+          # The smoke test signs its fake Telegram logins with this exact
+          # token (see BOT_TOKEN in scripts/smoke-test.mjs), so the Worker has
+          # to verify with the same one. Do NOT use .dev.vars.example here --
+          # its placeholder token differs, which made every login return 401
+          # and kept this job failing since it was introduced.
+          printf 'TELEGRAM_BOT_TOKEN=1234567890:TEST_TOKEN_FOR_LOCAL_SMOKE_TEST_ONLY\nTELEGRAM_BOT_USERNAME=smoke_test_bot\n' > .dev.vars
           nohup npx wrangler dev --port 8787 > wrangler.log 2>&1 &
           for i in $(seq 1 30); do
             curl -s http://localhost:8787/api/health && break
