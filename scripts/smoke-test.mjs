@@ -227,6 +227,17 @@ async function main() {
         body: JSON.stringify({ state: { v: 1, hacked: true } }),
       });
 
+    // Start from a known-clean state. The permitted same-origin write at the end
+    // of this block leaves { hacked: true } behind, so without this reset the
+    // "nothing changed" assertion below fails on any second run against the
+    // same database (the test user is fixed).
+    const reset = await fetch(`${BASE}/api/profiles/${pid}/settings`, {
+      method: "PUT",
+      headers: { "content-type": "application/json", cookie: csrfUser.cookie },
+      body: JSON.stringify({ state: { v: 1 } }),
+    });
+    assert.strictEqual(reset.status, 200, "same-origin reset must succeed");
+
     assert.strictEqual((await attempt({ origin: "https://evil.example" })).status, 403);
     assert.strictEqual((await attempt({ origin: "null" })).status, 403);
     assert.strictEqual((await attempt({ origin: "", referer: "https://evil.example/page" })).status, 403);

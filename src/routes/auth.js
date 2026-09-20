@@ -82,7 +82,11 @@ export async function handleTelegramLogin(request, env, ctx) {
       .bind(telegramId, username || null, first_name || null, last_name || null, photo_url || null, overlayToken)
       .run();
     user = await db.prepare("SELECT * FROM users WHERE telegram_id = ?").bind(telegramId).first();
-    await db.prepare("INSERT INTO overlay_settings (user_id, state) VALUES (?, '{}')").bind(user.id).run();
+    // NOTE: this used to also insert a row into the legacy overlay_settings
+    // table. Nothing reads that table any more (settings live in
+    // overlay_profiles since migration 0002), so it only produced dead rows.
+    // The table itself is left in place on purpose -- dropping it is an
+    // irreversible change to production data and is a separate, manual step.
     // Every account needs at least one overlay profile to actually use the
     // site -- give them their first one immediately, reusing the same
     // token so /overlay/<token> from a first-time signup works right away.
