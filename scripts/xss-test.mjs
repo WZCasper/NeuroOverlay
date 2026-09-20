@@ -37,6 +37,7 @@ const ok = (label) => { passed++; console.log(`  \u2713 ${label}`); };
 
 function loadPage(state) {
   const errors = [];
+  const sockets = [];
   const vc = new VirtualConsole();
   // jsdom cannot fetch stylesheets/iframes over the network; that is noise, not a page bug.
   vc.on("jsdomError", (e) => { if (!/Could not load (link|iframe)/.test(String(e.message))) errors.push(String(e.message)); });
@@ -48,10 +49,18 @@ function loadPage(state) {
     virtualConsole: vc,
     beforeParse(window) {
       window.fetch = async (u) => ({ ok: true, status: 200, json: async () => (String(u).includes("/state") ? { state } : {}) });
-      window.WebSocket = class { constructor() { this.readyState = 1; } addEventListener() {} removeEventListener() {} send() {} close() {} };
+      window.WebSocket = class {
+        constructor() { this.readyState = 1; this.h = {}; sockets.push(this); }
+        addEventListener(t, f) { (this.h[t] = this.h[t] || []).push(f); }
+        removeEventListener() {} send() {} close() {}
+      };
     },
   });
-  return new Promise((resolve) => setTimeout(() => resolve({ window: dom.window, errors, close: () => dom.window.close() }), 2500));
+  return new Promise((resolve) => setTimeout(() => resolve({
+    window: dom.window, errors, close: () => dom.window.close(),
+    // Deliver a message exactly as the Durable Object's broadcast would.
+    push: (msg) => sockets.forEach((sk) => (sk.h.message || []).forEach((f) => f({ data: JSON.stringify(msg) }))),
+  }), 2500));
 }
 
 const PWN = (n) => `window.__PWN_${n}=1`;
@@ -156,6 +165,34 @@ const PWN = (n) => `window.__PWN_${n}=1`;
   assert.deepStrictEqual(errors, []);
   ok("legit state: the page loads without uncaught errors");
   close();
+}
+
+// ---------- 3. canvas aspect ratio follows the profile's format, including live changes ----------
+{
+  const env = (fmt) => ({ v: 1, main: { v: 6, wins: {} }, presets: {}, daAuth: null, twitchAuth: null, ...(fmt ? { canvasFormat: fmt } : {}) });
+  const cvsVars = (w) => [w.document.documentElement.style.getPropertyValue("--cvs-w"), w.document.documentElement.style.getPropertyValue("--cvs-h")].join("x");
+
+  let page = await loadPage(env("9:16"));
+  assert.strictEqual(cvsVars(page.window), "9x16", "a 9:16 profile must load as 9:16");
+  ok("aspect ratio: a 9:16 profile loads as 9:16");
+  page.close();
+
+  page = await loadPage(env(null));
+  assert.strictEqual(cvsVars(page.window), "16x9", "profiles without a saved format default to 16:9");
+  ok("aspect ratio: a profile without a saved format defaults to 16:9");
+
+  // The regression: an overlay that is already open in OBS must follow a format
+  // change made in the editor, without the source being refreshed by hand.
+  page.push({ type: "state", state: env("9:16") });
+  assert.strictEqual(cvsVars(page.window), "9x16", "live change 16:9 -> 9:16 must reach an open overlay");
+  ok("aspect ratio: an already-open overlay follows a live 16:9 -> 9:16 change");
+  page.push({ type: "state", state: env("16:9") });
+  assert.strictEqual(cvsVars(page.window), "16x9", "live change back to 16:9 must also apply");
+  ok("aspect ratio: ...and the change back to 16:9");
+  page.push({ type: "state", state: env("garbage") });
+  assert.strictEqual(cvsVars(page.window), "16x9", "an unknown format value must fall back to 16:9, never break the canvas");
+  ok("aspect ratio: an unknown format value falls back to 16:9");
+  page.close();
 }
 
 console.log(`\nAll ${passed} XSS/regression checks passed.`);

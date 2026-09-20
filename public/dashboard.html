@@ -5391,6 +5391,16 @@ if (NOV_MODE !== "dashboard" && NOV_TOKEN) {
       try {
         var msg = JSON.parse(ev.data);
         if (msg.type === "state" && msg.state && msg.state.main) {
+          // Формат кадра лежит рядом с раскладкой в том же JSON. Раньше из
+          // сообщения бралась только раскладка (.main), поэтому оверлей,
+          // уже открытый в OBS, оставался в старом соотношении сторон
+          // (16:9 или 9:16), пока источник не обновят вручную — а виджеты
+          // при этом раскладывались уже под новый формат.
+          var liveFmt = msg.state.canvasFormat === "9:16" ? "9:16" : "16:9";
+          if (liveFmt !== __novCanvasFormat) {
+            __novCanvasFormat = liveFmt;
+            __novApplyCanvasFormat(liveFmt);
+          }
           applyState(msg.state.main);
         } else if (msg.type === "token_revoked") {
           document.body.innerHTML =
