@@ -111,7 +111,14 @@ textarea.inp{resize:vertical}
    клетка в кадр не идут, они не часть #cvs как таковой, только этого
    класса. */
 body.nov-editor-frame #cvs{
-  border:2px solid var(--tc);
+  /* inset box-shadow, not border: a real border shrinks #cvs's padding-box
+     (with box-sizing:border-box) by 2px per side, and that padding-box is
+     exactly what every widget's left/top/width/height % is measured
+     against — so the old border silently made the editable workspace ~4px
+     narrower/shorter than the border-less #cvs OBS actually renders from
+     overlay.html, throwing off 1:1 alignment. box-shadow paints the same
+     frame without consuming any layout space, so editor == OBS exactly. */
+  box-shadow:inset 0 0 0 2px var(--tc);
   background-image:
     linear-gradient(45deg,#242424 25%,transparent 25%),
     linear-gradient(-45deg,#242424 25%,transparent 25%),
