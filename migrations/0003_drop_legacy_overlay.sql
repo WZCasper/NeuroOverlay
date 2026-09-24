@@ -1,0 +1,28 @@
+-- Drops the legacy overlay_settings table, fully superseded by
+-- overlay_profiles since migration 0002 -- nothing in the application
+-- reads it any more (see the comment in src/routes/auth.js).
+--
+-- users.overlay_token is NOT dropped here. It's equally dead (every value
+-- it ever held is already duplicated in some row's overlay_profiles.token),
+-- but SQLite's ALTER TABLE ... DROP COLUMN refuses to drop a column that
+-- carries a UNIQUE constraint (confirmed locally: dropping the explicit
+-- idx_users_overlay_token index first still isn't enough -- SQLite raises
+-- "cannot drop UNIQUE column" regardless). Removing it correctly needs the
+-- standard SQLite table-rebuild procedure (new table, copy rows, drop old,
+-- rename) instead of a plain ALTER TABLE, and users is the table every
+-- foreign key in this schema points at (sessions.user_id,
+-- overlay_profiles.user_id), so that rebuild deserves its own migration
+-- and its own careful test pass rather than being rushed in alongside this.
+--
+-- IRREVERSIBLE on the live database once run -- take a D1 export first if
+-- you'd like a copy of this data. Run the same way as the earlier
+-- migrations:
+--   npx wrangler d1 execute neuroverlay --file=migrations/0003_drop_legacy_overlay.sql --remote
+-- (or via the D1 Console on the Cloudflare dashboard, one statement at a
+-- time if it complains about running several at once).
+--
+-- Safe to run more than once (including as part of `npm run db:migrate:*`,
+-- which always re-runs every file in this folder) -- DROP TABLE IF EXISTS
+-- is a no-op once the table is already gone.
+
+DROP TABLE IF EXISTS overlay_settings;
