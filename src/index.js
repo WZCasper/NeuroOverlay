@@ -15,6 +15,7 @@ import {
 import { handleGetOverlayState } from "./routes/overlay.js";
 import { handleListUsers } from "./routes/admin.js";
 import { handleObsLatest } from "./routes/obs.js";
+import { toPublicOverlayHtml } from "./render.js";
 
 export { OverlayRoom } from "./room.js";
 
@@ -56,11 +57,23 @@ export default {
         return handleWebSocketUpgrade(request, env, m[1]);
       }
 
-      // ---- Public overlay page (any token -> same static file) ----
+      // ---- Public overlay page (any token -> dashboard.html, re-rendered) ----
+      // There is only one HTML source file (public/dashboard.html); this
+      // route serves it with NOV_MODE flipped to "public" via render.js,
+      // so the dashboard and the overlay page can never drift apart the
+      // way two hand-maintained copies could.
       m = path.match(/^\/overlay\/([A-Za-z0-9_-]+)\/?$/);
       if (m && method === "GET") {
-        const asset = await env.ASSETS.fetch(new URL("/overlay.html", url));
-        return new Response(asset.body, asset);
+        const asset = await env.ASSETS.fetch(new URL("/dashboard.html", url));
+        const html = toPublicOverlayHtml(await asset.text());
+        // Copy the asset's headers (this is where the CSP/security headers
+        // from public/_headers come from) but drop content-length/etag:
+        // both described the original dashboard.html bytes, not the
+        // re-rendered body we're actually sending.
+        const headers = new Headers(asset.headers);
+        headers.delete("content-length");
+        headers.delete("etag");
+        return new Response(html, { status: asset.status, headers });
       }
 
       // ---- API: health / config (no auth) ----

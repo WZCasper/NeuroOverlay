@@ -101,6 +101,22 @@ async function main() {
     ok("public overlay endpoint serves state via the profile's token");
   }
 
+  // The actual overlay HTML page (what OBS's browser source loads) is
+  // derived server-side from dashboard.html by src/render.js -- confirm the
+  // real HTTP route flips NOV_MODE correctly and isn't just serving the
+  // dashboard verbatim.
+  {
+    const res = await fetch(`${BASE}/overlay/${profile1.token}`);
+    assert.strictEqual(res.status, 200);
+    assert.ok((res.headers.get("content-type") || "").includes("text/html"));
+    const html = await res.text();
+    assert.ok(html.includes('window.NOV_MODE = "public";'), "overlay page did not render in public mode");
+    assert.ok(html.includes("window.NOV_TOKEN = location.pathname"), "overlay page is missing the client-side token line");
+    assert.ok(!html.includes('window.NOV_MODE = "dashboard";'), "overlay page leaked dashboard mode");
+    assert.ok(html.includes("<title>"), "overlay page looks truncated/broken");
+    ok("GET /overlay/:token renders dashboard.html in public mode over real HTTP");
+  }
+
   // Create a second, independent profile.
   let profile2;
   {

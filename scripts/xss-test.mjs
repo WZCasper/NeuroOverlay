@@ -1,4 +1,9 @@
-// XSS regression test for the public overlay page (public/overlay.html).
+// XSS regression test for the public overlay page.
+//
+// There is a single HTML source file, public/dashboard.html; the public
+// overlay page served at /overlay/:token is that same markup with NOV_MODE
+// flipped to "public" by src/render.js (imported below, not reimplemented
+// here, so this test can never silently drift from what production does).
 //
 // The saved layout ("state") that this page renders is untrusted: it comes
 // from the database, from pasted preset codes and from the live sync socket.
@@ -15,24 +20,28 @@ import { readFileSync } from "node:fs";
 import { JSDOM, VirtualConsole } from "jsdom";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { toPublicOverlayHtml } from "../src/render.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const html = readFileSync(path.join(here, "..", "public", "overlay.html"), "utf8");
+const dashboardHtml = readFileSync(path.join(here, "..", "public", "dashboard.html"), "utf8");
+const html = toPublicOverlayHtml(dashboardHtml);
 
 let passed = 0;
 const ok = (label) => { passed++; console.log(`  \u2713 ${label}`); };
 
-// Guard against shipping a stale copy: overlay.html and dashboard.html are the
-// same program and must only differ in their 2-line mode header. If someone
-// regenerates one but not the other, the un-hardened one ends up in production.
+// Guard against a broken/no-op transform shipping a dashboard-mode page to
+// OBS: confirm render.js actually flipped the header and left the rest of
+// the 350KB file untouched, and that the hardening helpers are present.
 {
-  const dash = readFileSync(path.join(here, "..", "public", "dashboard.html"), "utf8");
-  const strip = (h) => h.replace(/window\.NOV_MODE = "[a-z]+";\n(window\.NOV_TOKEN = [^\n]*\n|\n)/, "");
-  assert.strictEqual(strip(html), strip(dash), "overlay.html and dashboard.html must be identical apart from the NOV_MODE header");
+  assert.ok(html.includes('window.NOV_MODE = "public";'), "render.js did not flip NOV_MODE to public");
+  assert.ok(html.includes("window.NOV_TOKEN = location.pathname"), "render.js dropped the client-side NOV_TOKEN line");
+  assert.ok(!html.includes('window.NOV_MODE = "dashboard";'), "render.js left the dashboard-mode header in place");
+  const bodyOnly = (h) => h.slice(h.indexOf("</script>"));
+  assert.strictEqual(bodyOnly(html), bodyOnly(dashboardHtml), "render.js changed something beyond the NOV_MODE header");
   for (const fn of ["function escHtml", "function safeId", "function safeUrl", "function safeImgUrl"]) {
-    assert.ok(html.includes(fn), `overlay.html is missing ${fn} -- a stale/un-hardened copy?`);
+    assert.ok(html.includes(fn), `rendered overlay page is missing ${fn} -- a stale/un-hardened copy?`);
   }
-  ok("overlay.html and dashboard.html are in sync and both contain the security helpers");
+  ok("dashboard.html renders into a correct public overlay page via render.js, security helpers intact");
 }
 
 function loadPage(state) {
